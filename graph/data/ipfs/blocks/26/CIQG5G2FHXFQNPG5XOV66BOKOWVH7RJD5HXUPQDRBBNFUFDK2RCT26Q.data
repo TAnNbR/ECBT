@@ -1,0 +1,37 @@
+
+©¡dataSources:
+  - kind: ethereum
+    mapping:
+      abis:
+        - file:
+            /: /ipfs/Qmdyn1kDeMqLN14EMXf2zcSUPsg645M2212ZBQmJR7kGWe
+          name: OrderBook
+      apiVersion: 0.0.7
+      entities:
+        - Order
+        - OrderFill
+        - OrderCancellation
+        - User
+        - GlobalStats
+      eventHandlers:
+        - event: OrderCreated(indexed uint256,indexed address,uint256,uint256)
+          handler: handleOrderCreated
+        - event: OrderFilled(indexed uint256,indexed address,uint256,uint256,uint256)
+          handler: handleOrderFilled
+        - event: OrderCancelled(indexed uint256,uint256)
+          handler: handleOrderCancelled
+      file:
+        /: /ipfs/QmVPi1gbDpC6LusSHueVEzvv3hB7C8pMworcBs7jqsEPqc
+      kind: ethereum/events
+      language: wasm/assemblyscript
+    name: OrderBook
+    network: localhost
+    source:
+      abi: OrderBook
+      address: '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512'
+      startBlock: 0
+schema:
+  file:
+    /: /ipfs/QmSL1nYiLwh3swekWLtbnuppWKafP1tUdE6wKF5guWdjqq
+specVersion: 0.0.5
+¡

@@ -1,0 +1,76 @@
+
+��type Order @entity(immutable: false) {
+  id: ID!                           # orderId
+  orderId: BigInt!                  # 订单ID
+  seller: User!                     # 卖方地址
+  sellerAddress: Bytes!             # 卖方地址 (Bytes)
+  amount: BigInt!                   # 卖出数量
+  price: BigInt!                    # 单价
+  filledAmount: BigInt!             # 已成交数量
+  remainingAmount: BigInt!          # 剩余数量
+  status: OrderStatus!              # 订单状态
+  totalPaymentReceived: BigInt!     # 总收到的支付金额
+  createdAt: BigInt!                # 创建时间
+  createdAtBlock: BigInt!           # 创建区块
+  updatedAt: BigInt!                # 更新时间
+  updatedAtBlock: BigInt!           # 更新区块
+  fills: [OrderFill!]! @derivedFrom(field: "order")  # 成交记录
+  cancellation: OrderCancellation   # 取消记录
+}
+
+type OrderFill @entity(immutable: true) {
+  id: ID!                           # txHash-logIndex
+  order: Order!                     # 关联订单
+  orderId: BigInt!                  # 订单ID
+  buyer: User!                      # 买方地址
+  buyerAddress: Bytes!              # 买方地址 (Bytes)
+  filledAmount: BigInt!             # 本次成交数量
+  remainingAmount: BigInt!          # 成交后剩余数量
+  totalPayment: BigInt!             # 本次支付总额
+  timestamp: BigInt!                # 成交时间
+  blockNumber: BigInt!              # 区块号
+  transactionHash: Bytes!           # 交易哈希
+}
+
+type OrderCancellation @entity(immutable: true) {
+  id: ID!                           # orderId
+  order: Order!                     # 关联订单
+  orderId: BigInt!                  # 订单ID
+  refundedAmount: BigInt!           # 退还数量
+  timestamp: BigInt!                # 取消时间
+  blockNumber: BigInt!              # 区块号
+  transactionHash: Bytes!           # 交易哈希
+}
+
+enum OrderStatus {
+  Active                            # 活跃
+  Filled                            # 已完全成交
+  Cancelled                         # 已取消
+}
+
+type User @entity(immutable: false) {
+  id: ID!                           # 用户地址
+  address: Bytes!                   # 用户地址
+  ordersCreated: [Order!]! @derivedFrom(field: "seller")  # 创建的订单
+  fills: [OrderFill!]! @derivedFrom(field: "buyer")       # 购买记录
+  totalOrdersCreated: BigInt!       # 创建订单总数
+  totalOrdersFilled: BigInt!        # 成交订单总数
+  totalOrdersCancelled: BigInt!     # 取消订单总数
+  totalVolumeAssSeller: BigInt!     # 作为卖方的总交易量
+  totalVolumeAsBuyer: BigInt!       # 作为买方的总交易量
+}
+
+type GlobalStats @entity(immutable: false) {
+  id: ID!                           # "global"
+  totalOrders: BigInt!              # 总订单数
+  totalActiveOrders: BigInt!        # 活跃订单数
+  totalFilledOrders: BigInt!        # 已完成订单数
+  totalCancelledOrders: BigInt!     # 已取消订单数
+  totalVolume: BigInt!              # 总交易量
+  totalFills: BigInt!               # 总成交次数
+  uniqueUsers: BigInt!              # 唯一用户数
+  lastUpdateTimestamp: BigInt!      # 最后更新时间
+  lastUpdateBlock: BigInt!          # 最后更新区块
+}
+
+�

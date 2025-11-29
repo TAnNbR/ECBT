@@ -1,0 +1,21 @@
+{
+  "name": "ecbt",
+  "version": "1.0.0",
+  "description": "ECBT Platform - Real World Asset Tokenization",
+  "scripts": {
+    "test": "hardhat test",
+    "compile": "hardhat compile",
+    "node": "hardhat node"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@nomicfoundation/hardhat-network-helpers": "^1.0.0",
+    "@nomicfoundation/hardhat-chai-matchers": "^2.0.0",
+    "@nomicfoundation/hardhat-ethers": "^3.0.0",
+    "@openzeppelin/contracts": "^5.0.0",
+    "chai": "^4.3.10",
+    "ethers": "^6.11.0",
+    "hardhat": "^2.22.0"
+  }
+}
+

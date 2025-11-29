@@ -1,0 +1,187 @@
+# 查询全局统计
+query GlobalStats {
+  globalStats(id: "global") {
+    id
+    totalOrders
+    totalActiveOrders
+    totalFilledOrders
+    totalCancelledOrders
+    totalVolume
+    totalFills
+    uniqueUsers
+    lastUpdateTimestamp
+  }
+}
+
+# 查询所有活跃订单
+query ActiveOrders {
+  orders(
+    first: 10
+    orderBy: createdAt
+    orderDirection: desc
+    where: { status: Active }
+  ) {
+    id
+    orderId
+    sellerAddress
+    amount
+    price
+    filledAmount
+    remainingAmount
+    status
+    createdAt
+    fills {
+      id
+      buyerAddress
+      filledAmount
+      totalPayment
+      timestamp
+    }
+  }
+}
+
+# 查询指定用户的订单
+query UserOrders($userAddress: String!) {
+  user(id: $userAddress) {
+    id
+    address
+    totalOrdersCreated
+    totalOrdersFilled
+    totalOrdersCancelled
+    totalVolumeAssSeller
+    totalVolumeAsBuyer
+    ordersCreated(first: 20, orderBy: createdAt, orderDirection: desc) {
+      id
+      orderId
+      amount
+      price
+      filledAmount
+      status
+      createdAt
+    }
+  }
+}
+
+# 查询单个订单详情
+query OrderDetails($orderId: String!) {
+  order(id: $orderId) {
+    id
+    orderId
+    sellerAddress
+    amount
+    price
+    filledAmount
+    remainingAmount
+    status
+    totalPaymentReceived
+    createdAt
+    updatedAt
+    fills {
+      id
+      buyerAddress
+      filledAmount
+      remainingAmount
+      totalPayment
+      timestamp
+      transactionHash
+    }
+    cancellation {
+      id
+      refundedAmount
+      timestamp
+      transactionHash
+    }
+  }
+}
+
+# 查询最近的成交记录
+query RecentFills {
+  orderFills(first: 20, orderBy: timestamp, orderDirection: desc) {
+    id
+    orderId
+    buyerAddress
+    filledAmount
+    totalPayment
+    timestamp
+    blockNumber
+    order {
+      orderId
+      sellerAddress
+      price
+    }
+  }
+}
+
+# 查询最近取消的订单
+query RecentCancellations {
+  orderCancellations(first: 10, orderBy: timestamp, orderDirection: desc) {
+    id
+    orderId
+    refundedAmount
+    timestamp
+    transactionHash
+    order {
+      orderId
+      sellerAddress
+      amount
+      price
+    }
+  }
+}
+
+# 查询用户的购买记录
+query UserPurchases($userAddress: String!) {
+  user(id: $userAddress) {
+    id
+    address
+    totalVolumeAsBuyer
+    fills(first: 20, orderBy: timestamp, orderDirection: desc) {
+      id
+      orderId
+      filledAmount
+      totalPayment
+      timestamp
+      order {
+        orderId
+        sellerAddress
+        price
+      }
+    }
+  }
+}
+
+# 统计查询 - 所有用户按交易量排序
+query TopSellers {
+  users(
+    first: 10
+    orderBy: totalVolumeAssSeller
+    orderDirection: desc
+    where: { totalVolumeAssSeller_gt: "0" }
+  ) {
+    id
+    address
+    totalOrdersCreated
+    totalOrdersFilled
+    totalVolumeAssSeller
+  }
+}
+
+# 统计查询 - 大额订单
+query LargeOrders($minAmount: BigInt!) {
+  orders(
+    first: 20
+    orderBy: amount
+    orderDirection: desc
+    where: { amount_gte: $minAmount }
+  ) {
+    id
+    orderId
+    sellerAddress
+    amount
+    price
+    status
+    filledAmount
+    createdAt
+  }
+}
+

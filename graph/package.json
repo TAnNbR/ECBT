@@ -1,0 +1,26 @@
+{
+  "name": "orderbook-test",
+  "version": "1.0.0",
+  "scripts": {
+    "deploy": "hardhat run scripts/deploy-and-test.js --network localhost",
+    "verify": "hardhat run scripts/verify-events.js --network localhost",
+    "graph:start": "./start-graph.sh",
+    "graph:stop": "./stop-graph.sh",
+    "graph:logs": "docker-compose logs -f graph-node",
+    "graph:codegen": "graph codegen",
+    "graph:build": "graph build",
+    "graph:create-local": "graph create --node http://localhost:8020/ orderbook",
+    "graph:deploy-local": "graph deploy --node http://localhost:8020/ --ipfs http://localhost:5001 orderbook",
+    "graph:remove-local": "graph remove --node http://localhost:8020/ orderbook",
+    "graph:health": "./check-graph-health.sh"
+  },
+  "dependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^3.0.0",
+    "@openzeppelin/contracts": "^5.0.0",
+    "hardhat": "^2.19.0"
+  },
+  "devDependencies": {
+    "@graphprotocol/graph-cli": "^0.98.1",
+    "@graphprotocol/graph-ts": "^0.38.2"
+  }
+}
