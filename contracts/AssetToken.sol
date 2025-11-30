@@ -16,63 +16,95 @@ import "./interfaces/IOrderBook.sol";
  */
 contract AssetToken is IAssetToken, ERC20 {
 
-    // 资产元数据结构体
+    /**
+     * @dev 资产元数据结构体
+     * @dev 存储资产的基本信息和募资参数
+     */
     struct AssetMetadata {
-        string name;
-        string symbol;
-        uint256 totalValue;             // 资产总价值
-        uint256 fundraiseAmount;        // 募集金额
-        uint256 maxTotalSupply;         // 代币总发行量上限
-        address specialPurposeVehicle;  // 法律实体
-        address provider;               // 资产提供方
-        uint256 createdAt;              // 创建时间
+        string name;                        // 资产名称
+        string symbol;                      // 资产代号
+        uint256 totalValue;                 // 资产总价值（USDT计价）
+        uint256 fundraiseAmount;            // 募集金额目标
+        uint256 maxTotalSupply;             // 代币总发行量上限
+        address specialPurposeVehicle;      // 法律实体（SPV）地址
+        address provider;                   // 资产提供方地址
+        uint256 createdAt;                  // 资产创建时间戳
     }
 
-    // 持有者信息结构体
+    /**
+     * @dev 持有者信息结构体
+     * @dev 用于追踪每个持有者的份额和收益领取情况
+     * @dev 一个持有者可能有多个 HolderInfo 记录（不同时间购买）
+     */
     struct HolderInfo {
-        uint256 shares;                      // 持有份额
-        uint256 holdingStartTime;            // 持有开始时间
-        uint256 lastDividendTime;            // 上次分红时间
-        uint256 lastLiquidationClaimTime;    // 上次领取清算金时间
+        uint256 shares;                      // 持有份额数量
+        uint256 holdingStartTime;            // 持有开始时间（首次获得时）
+        uint256 lastDividendTime;            // 上次领取分红的时间
+        uint256 lastLiquidationClaimTime;    // 上次领取清算金的时间
     }
 
-    // 无效时间戳常量：表示从未领取
+    // ============ 常量 ============
+    
+    // 无效时间戳常量：表示从未领取分红/清算金，使用最大的 uint256 值作为标记
     uint256 public constant INVALID_TIMESTAMP = type(uint256).max;
 
-    // 资产元数据
+    // ============ 状态变量 ============
+    
+    // 资产元数据（名称、总价值、募资目标等）
     AssetMetadata public metadata;
 
-    // 支付代币地址（用于购买，例如 USDT）
+    // 支付代币地址（用于购买资产代币，通常是 USDT）
     address public paymentToken;
 
-    // 抵押品金库合约地址
+    // 抵押品金库合约地址（存储募集资金和收益）
     address public collateralVault;
 
-    // 收益管理合约地址
+    // 收益管理合约地址（记录和计算分红）
     address public revenueManager;
 
-    // 清算管理合约地址
+    // 清算管理合约地址（处理资产未达标时的清算）
     address public liquidateManager;
 
-    // 订单簿合约地址
+    // 订单簿合约地址（处理二级市场交易）
     address public orderBook;
 
-    // 持有者列表
+    // 持有者地址列表（所有曾经持有过代币的地址）
     address[] public holders;
+    
+    // 持有者状态映射（地址 => 是否为持有者）
     mapping(address => bool) public isHolder;
 
-    // 持有者信息映射
+    // 持有者信息映射（地址 => HolderInfo数组），一个地址可能有多个份额记录，代表不同时间的购买
     mapping(address => HolderInfo[]) public holderInfo;
 
-    // 持有者的订单列表（持有者地址 => 订单ID数组）
+    // 持有者的订单列表（持有者地址 => 订单ID数组），记录该持有者在 OrderBook 上创建的所有卖单
     mapping(address => uint256[]) public holderOrders;
 
-    // 账户冻结金额
+    // 账户冻结金额（地址 => 冻结数量），当份额挂单出售时会被冻结，避免二次出售
     mapping(address => uint256) public frozenAmounts;
 
-    // 剩余可铸造供应量
+    // 剩余可铸造供应量，初始值为 maxTotalSupply，每次 purchase 后递减
     uint256 public remainingMintableSupply;
 
+    // 供应量耗尽时间戳（售罄时间），0 表示尚未售罄
+    uint256 public soldOutTimestamp;
+
+    // ============ 修饰符 ============
+
+    /**
+     * @notice 检查代币是否已售罄
+     * @dev 要求 soldOutTimestamp 不为 0，即代币供应量已完全耗尽
+     */
+    modifier onlySoldOut() {
+        require(soldOutTimestamp != 0, "Token not sold out yet");
+        _;
+    }
+
+    /**
+     * @notice 构造函数
+     * @dev 使用工厂模式，实际参数由 initialize 函数设置
+     * @dev 这样可以使用相同的合约代码创建多个不同的资产代币
+     */
     constructor() ERC20("Asset Token", "ASSET") {
         // 初始化时不设置任何权限，由initialize函数设置
     }
@@ -80,7 +112,10 @@ contract AssetToken is IAssetToken, ERC20 {
     /**
      * @notice 初始化资产代币（用于工厂模式）
      * @param _metadata 资产元数据
-     * @param _paymentToken 支付代币地址
+     * @param _paymentToken 支付代币地址（如 USDT）
+     * @param _collateralVault 抵押品金库地址
+     * @param _revenueManager 收益管理合约地址
+     * @dev 该函数只能调用一次，用于设置合约的基本参数
      */
     function initialize(
         AssetMetadata memory _metadata,
@@ -88,36 +123,65 @@ contract AssetToken is IAssetToken, ERC20 {
         address _collateralVault,
         address _revenueManager
     ) external {
+        // 通过检查 createdAt 确保只能初始化一次
         require(metadata.createdAt == 0, "Already initialized");
         
+        // 保存资产元数据
         metadata = _metadata;
+        
+        // 设置关键合约地址
         paymentToken = _paymentToken;
         collateralVault = _collateralVault;
         revenueManager = _revenueManager;
+        
+        // 初始化可铸造供应量为最大供应量
         remainingMintableSupply = _metadata.maxTotalSupply;
     }
         
     /**
      * @notice 购买资产代币
      * @param amount 购买数量
+     * @dev 用户需要先 approve paymentToken 给 collateralVault
+     * @dev 支付金额计算公式: (amount × fundraiseAmount) / maxTotalSupply
+     * @dev 执行流程:
+     *      1. 验证购买数量和剩余供应量
+     *      2. 计算并转移支付代币到抵押品金库
+     *      3. 铸造资产代币给购买者
+     *      4. 创建持有者信息记录
      */
     function purchase(uint256 amount) external {
+        // 1. 验证购买数量
         require(amount > 0, "Amount must be greater than 0");
         require(remainingMintableSupply >= amount, "Insufficient remaining supply");
         
+        // 2. 计算需要支付的金额
+        // 公式: 购买数量 × 募集总额 ÷ 代币总量
         uint256 paymentAmount = (amount * metadata.fundraiseAmount) / metadata.maxTotalSupply;
         require(paymentAmount > 0, "Payment amount too small");
         
+        // 3. 转移支付代币（USDT等）到抵押品金库
         require(collateralVault != address(0), "Collateral vault not set");
         require(
             IERC20(paymentToken).transferFrom(msg.sender, collateralVault, paymentAmount),
             "Payment transfer failed"
         );
         
+        // 4. 铸造资产代币给购买者
         _mint(msg.sender, amount);
+        
+        // 5. 更新剩余可铸造数量
         remainingMintableSupply -= amount;
         
+        // 6. 如果供应量耗尽，记录售罄时间戳
+        if (remainingMintableSupply == 0 && soldOutTimestamp == 0) {
+            soldOutTimestamp = block.timestamp;
+        }
+        
+        // 7. 将购买者添加到持有者列表
         _addHolder(msg.sender);
+        
+        // 8. 创建持有者信息记录
+        // 初始时分红和清算时间都设为 INVALID_TIMESTAMP，表示从未领取
         holderInfo[msg.sender].push(HolderInfo({
             shares: amount,
             holdingStartTime: block.timestamp,
@@ -128,54 +192,72 @@ contract AssetToken is IAssetToken, ERC20 {
 
     /**
      * @notice 提取分红和清算金
-     * @param recipient 接收者地址
-     * @param holder 持有者地址
+     * @param recipient 接收者地址（可以是其他地址）
+     * @param holder 持有者地址（代币持有者）
+     * @return dividendAmount 提取的分红金额
+     * @dev 执行流程:
+     *      1. 遍历持有者的所有份额，计算每份额的分红和清算金
+     *      2. 转移分红和清算金到接收者
+     *      3. 合并所有份额为单一记录，更新分红和清算时间
      */
     function withdrawDividend(
         address recipient,
         address holder
-    ) external returns (uint256 dividendAmount) {
+    ) public onlySoldOut() returns (uint256) {
+        // 验证地址有效性
         require(recipient != address(0), "Invalid recipient");
         require(holder != address(0), "Invalid holder");
         require(holderInfo[holder].length > 0, "No shares held");
         
+        // 当前时间作为提取时间
         uint256 withdrawTime = block.timestamp;
-        dividendAmount = 0;
-        uint256 totalLiquidationCount = 0;
-        uint256 totalShares = 0;
         
+        // 初始化累计变量
+        uint256 dividendAmount = 0;         // 总分红金额
+        uint256 totalLiquidationCount = 0;  // 总清算次数
+        uint256 totalShares = 0;            // 总份额
+        
+        // 遍历持有者的所有份额信息（可能有多个不同时间购买的份额）
         for (uint256 i = 0; i < holderInfo[holder].length; i++) {
             HolderInfo storage info = holderInfo[holder][i];
             
+            // 获取该份额的上次分红时间和清算时间
             uint256 lastDividendTime = info.lastDividendTime;
             uint256 lastClaimTime = info.lastLiquidationClaimTime;
             
+            // 如果从未分红过，使用持有开始时间作为起点
             if (lastDividendTime == INVALID_TIMESTAMP) {
                 lastDividendTime = info.holdingStartTime;
             }
+            // 如果从未领取过清算金，使用持有开始时间作为起点
             if (lastClaimTime == INVALID_TIMESTAMP) {
                 lastClaimTime = info.holdingStartTime;
             }
             
+            // 计算该份额的分红金额
             if (withdrawTime > lastDividendTime) {
                 uint256 shareDividend = _calculateDividendAmount(lastDividendTime, withdrawTime, info.shares);
                 dividendAmount += shareDividend;
             }
 
+            // 计算该份额期间的清算次数
             if (withdrawTime > lastClaimTime && liquidateManager != address(0)) {
-                (uint256 liquidationCount,,) = ILiquidateManager(liquidateManager).findLiquidationTimeRange(lastClaimTime, withdrawTime);
+                uint256 liquidationCount = ILiquidateManager(liquidateManager).findLiquidationTimeRange(lastClaimTime, withdrawTime);
                 if (liquidationCount > 0) {
                     totalLiquidationCount += liquidationCount;
                 }
             }
 
+            // 累加总份额
             totalShares += info.shares;
         }
         
+        // 转移分红到接收者
         if (dividendAmount > 0 && collateralVault != address(0)) {
             ICollateralVault(collateralVault).transferRevenue(recipient, dividendAmount);
         }
 
+        // 转移清算金到接收者
         if (totalLiquidationCount > 0 && collateralVault != address(0)) {
             uint256 totalSupplyAmount = totalSupply();
             ICollateralVault(collateralVault).transferLiquidatableCollateral(
@@ -186,48 +268,65 @@ contract AssetToken is IAssetToken, ERC20 {
             );
         }
         
+        // 合并所有份额：删除旧记录，创建单一的新记录
+        // 更新时间戳为当前提取时间，作为下次计算的起点
         delete holderInfo[holder];
         holderInfo[holder].push(HolderInfo({
             shares: totalShares,
-            holdingStartTime: INVALID_TIMESTAMP,
-            lastDividendTime: withdrawTime,
-            lastLiquidationClaimTime: withdrawTime
+            holdingStartTime: INVALID_TIMESTAMP,   // 不再需要持有开始时间
+            lastDividendTime: withdrawTime,        // 更新为当前时间
+            lastLiquidationClaimTime: withdrawTime // 更新为当前时间
         }));
         
         return dividendAmount;
     }
 
     /**
-     * @notice 出售资产份额
+     * @notice 出售资产份额（创建卖单）
      * @param amount 出售数量
-     * @param price 单价
-     * @param recipient 接收者地址
+     * @param price 单价（稳定币，精度18位）
+     * @param recipient 分红接收者地址
+     * @return orderId 创建的订单ID
+     * @dev 执行流程:
+     *      1. 先提取所有分红和清算金，合并所有份额
+     *      2. 授权 OrderBook 可以转移代币
+     *      3. 冻结相应数量的份额
+     *      4. 在 OrderBook 创建卖单
      */
     function sellShares(
         uint256 amount,
         uint256 price,
         address recipient
     ) external returns (uint256) {
+        // 1. 验证参数
         require(amount > 0, "Amount must be greater than 0");
         require(price > 0, "Price must be greater than 0");
         require(orderBook != address(0), "OrderBook not set");
 
+        // 2. 先提取所有可领取的分红和清算金，并合并所有份额
+        // 这样确保卖家不会错过任何收益
         withdrawDividend(recipient, msg.sender);
         
+        // 3. 提取后只剩一个份额记录，检查是否足够
         HolderInfo storage info = holderInfo[msg.sender][0];
-        require(info.shares > 0, "No shares held");
+        require(info.shares >= amount, "Insufficient shares");
         
+        // 4. 授权 OrderBook 合约可以转移相应数量的代币
+        // 使用累加方式，避免覆盖之前的授权额度
         _approve(
             msg.sender, 
-            orderBook, 
+            address(this), 
             allowance(msg.sender, address(this)) + amount
         );
         
+        // 5. 冻结相应份额，防止重复出售
         frozenAmounts[msg.sender] += amount;
         
+        // 6. 获取卖方当前的分红和清算时间，传给订单簿
         uint256 lastDividendTime = info.lastDividendTime;
         uint256 lastClaimTime = info.lastLiquidationClaimTime;
         
+        // 7. 在 OrderBook 创建卖单
         uint256 orderId = IOrderBook(orderBook).createSellOrder(
             amount, 
             price, 
@@ -235,6 +334,7 @@ contract AssetToken is IAssetToken, ERC20 {
             lastClaimTime
         );
         
+        // 8. 记录订单到持有者的订单列表
         holderOrders[msg.sender].push(orderId);
         
         return orderId;
@@ -243,55 +343,82 @@ contract AssetToken is IAssetToken, ERC20 {
     /**
      * @notice 取消订单
      * @param orderId 订单ID
+     * @dev 执行流程:
+     *      1. 验证订单所有权和状态
+     *      2. 取消订单
+     *      3. 恢复持有者信息，保留订单创建时的分红和清算时间
      */
     function cancelOrder(uint256 orderId) external {
         require(orderBook != address(0), "OrderBook not set");
         
+        // 1. 从 OrderBook 获取订单信息
         IOrderBook orderBook_ = IOrderBook(orderBook);
         IOrderBook.Order memory order = orderBook_.getOrder(orderId);
         
+        // 2. 验证订单所有权
         require(order.seller == msg.sender, "Not order owner");
         require(order.status == IOrderBook.OrderStatus.Active, "Order not active");
         
+        // 3. 计算需要退还的数量
         uint256 refundAmount = order.amount - order.filledAmount;
+        
+        // 4. 保存订单创建时的时间戳
+        // 这些时间戳很重要，用于计算期间的分红和清算金
         uint256 orderLastDividendTime = order.lastDividendTime;
         uint256 orderLastLiquidationClaimTime = order.lastLiquidationClaimTime;
         
+        // 5. 调用 OrderBook 取消订单
         orderBook_.cancelOrder(orderId);
         
+        // 6. 恢复持有者信息，添加取消订单的份额
+        // 保留订单创建时的分红和清算时间，以便正确计算期间收益
         if (refundAmount > 0) {
             holderInfo[msg.sender].push(
                 HolderInfo({
                     shares: refundAmount,
-                    holdingStartTime: INVALID_TIMESTAMP,
-                    lastDividendTime: orderLastDividendTime,
-                    lastLiquidationClaimTime: orderLastLiquidationClaimTime
+                    holdingStartTime: INVALID_TIMESTAMP,  // 不需要持有开始时间
+                    lastDividendTime: orderLastDividendTime,  // 使用订单创建时的时间
+                    lastLiquidationClaimTime: orderLastLiquidationClaimTime  // 使用订单创建时的时间
                 })
             );
         }
     }
 
     /**
-     * @notice 支付订单
+     * @notice 支付订单（买家购买卖单）
      * @param orderId 订单ID
      * @param purchaseAmount 购买数量
+     * @dev 买家需要先 approve paymentToken 给卖家
+     * @dev 执行流程:
+     *      1. 验证订单状态和购买数量
+     *      2. 计算并转移分红给卖家（订单创建到现在期间的收益）
+     *      3. 计算并转移清算金给卖家
+     *      4. 买家支付代币给卖家
+     *      5. 转移 AssetToken 从卖家到买家
+     *      6. 创建买家的持有信息
+     *      7. 更新订单状态
      */
     function payOrder(uint256 orderId, uint256 purchaseAmount) external {
         require(orderBook != address(0), "OrderBook not set");
         require(purchaseAmount > 0, "Purchase amount must be greater than 0");
         
+        // 1. 获取订单信息
         IOrderBook orderBook_ = IOrderBook(orderBook);
         IOrderBook.Order memory order = orderBook_.getOrder(orderId);
         
+        // 2. 验证订单状态
         require(order.status == IOrderBook.OrderStatus.Active, "Order not active");
         uint256 remainingAmount = order.amount - order.filledAmount;
         require(purchaseAmount <= remainingAmount, "Purchase amount exceeds remaining");
         
+        // 3. 提取订单和卖家信息
         address seller = order.seller;
-        uint256 orderLastDividendTime = order.lastDividendTime;
-        uint256 orderLastLiquidationClaimTime = order.lastLiquidationClaimTime;
+        uint256 orderLastDividendTime = order.lastDividendTime;  // 订单创建时的分红时间
+        uint256 orderLastLiquidationClaimTime = order.lastLiquidationClaimTime;  // 订单创建时的清算时间
         uint256 currentTime = block.timestamp;
         
+        // 4. 计算并转移期间分红给卖家
+        // 从订单创建时间到现在，卖家应得的分红
         uint256 dividendAmount = 0;
         if (currentTime > orderLastDividendTime && orderLastDividendTime != INVALID_TIMESTAMP && revenueManager != address(0)) {
             dividendAmount = _calculateDividendAmount(
@@ -305,8 +432,9 @@ contract AssetToken is IAssetToken, ERC20 {
             }
         }
         
+        // 5. 计算并转移期间清算金给卖家
         if (currentTime > orderLastLiquidationClaimTime && orderLastLiquidationClaimTime != INVALID_TIMESTAMP && liquidateManager != address(0)) {
-            (uint256 liquidationCount,,) = ILiquidateManager(liquidateManager).findLiquidationTimeRange(
+            uint256 liquidationCount = ILiquidateManager(liquidateManager).findLiquidationTimeRange(
                 orderLastLiquidationClaimTime,
                 currentTime
             );
@@ -322,6 +450,8 @@ contract AssetToken is IAssetToken, ERC20 {
             }
         }
         
+        // 6. 买家支付稳定币给卖家
+        // 支付金额 = 购买数量 × 单价
         uint256 paymentAmount = (purchaseAmount * order.price) / 1e18;
         require(paymentAmount > 0, "Payment amount is zero");
         require(paymentToken != address(0), "Payment token not set");
@@ -330,51 +460,72 @@ contract AssetToken is IAssetToken, ERC20 {
             "Payment transfer failed"
         );
         
+        // 7. 转移 AssetToken 从卖家到买家
         _transfer(seller, msg.sender, purchaseAmount);
         
+        // 8. 将买家添加到持有者列表
         _addHolder(msg.sender);
+        
+        // 9. 创建买家的持有信息
+        // 买家从当前时间开始持有，分红和清算时间设为 INVALID_TIMESTAMP
         holderInfo[msg.sender].push(
             HolderInfo({
                 shares: purchaseAmount,
                 holdingStartTime: currentTime,
-                lastDividendTime: INVALID_TIMESTAMP,
-                lastLiquidationClaimTime: INVALID_TIMESTAMP
+                lastDividendTime: INVALID_TIMESTAMP,  // 从未分红
+                lastLiquidationClaimTime: INVALID_TIMESTAMP  // 从未领取清算金
             })
         );
         
+        // 10. 更新 OrderBook 中的订单状态（已成交数量）
         orderBook_.fillOrder(orderId, purchaseAmount);
     }
 
     /**
-     * @notice 计算分红金额
+     * @notice 计算指定时间段内的分红金额
+     * @param lastDividendTime 上次分红时间（开始时间）
+     * @param withdrawTime 提取时间（结束时间）
+     * @param holderShares 持有份额数量
+     * @return dividendAmount 该份额应得的分红金额
+     * @dev 计算公式: (持有份额 / 总供应量) × 期间总收益
+     * @dev 使用 RevenueManager 查询期间累计收益差值
      */
     function _calculateDividendAmount(
         uint256 lastDividendTime,
         uint256 withdrawTime,
         uint256 holderShares
-    ) private view returns (uint256 dividendAmount) {
+    ) internal onlySoldOut() view returns (uint256 dividendAmount) {
+        // 安全检查
         if (revenueManager == address(0)) return 0;
         if (withdrawTime <= lastDividendTime) return 0;
         
-        (bool foundMin, uint256 minIndex) = IRevenueManager(revenueManager).findMinMarkedIndex(
-            lastDividendTime,
-            withdrawTime
+        // 1. 获取 lastDividendTime 之前或当时的累计收益
+        (bool foundStart, uint256 startIndex) = IRevenueManager(revenueManager).findMaxMarkedIndex(
+            soldOutTimestamp,
+            lastDividendTime
         );
         
+        // 2. 查找时间范围内的最大索引（最晚的收益记录）
         (bool foundMax, uint256 maxIndex) = IRevenueManager(revenueManager).findMaxMarkedIndex(
             lastDividendTime,
             withdrawTime
         );
         
-        if (!foundMin || !foundMax) return 0;
-        if (minIndex > maxIndex) return 0;
+        // 3. 如果没有找到收益记录，返回0
+        if (!foundStart && !foundMax) return 0;
         
-        uint256 revenueAtMinIndex = IRevenueManager(revenueManager).getAccumulatedRevenueAt(minIndex);
-        uint256 revenueAtMaxIndex = IRevenueManager(revenueManager).getAccumulatedRevenueAt(maxIndex);
+        // 4. 获取两个时间点的累计收益
+        uint256 revenueAtMinIndex = foundStart ? IRevenueManager(revenueManager).getAccumulatedRevenueAt(startIndex) : 0;
+        uint256 revenueAtMaxIndex = foundMax   ? IRevenueManager(revenueManager).getAccumulatedRevenueAt(maxIndex)   : 0;
         
-        if (revenueAtMaxIndex < revenueAtMinIndex) return 0;
-        uint256 periodRevenue = revenueAtMaxIndex - revenueAtMinIndex;
+        // 5. 计算期间总收益（累计收益的差值）
+        uint256 periodRevenue = 
+            revenueAtMaxIndex > revenueAtMinIndex 
+            ? revenueAtMaxIndex - revenueAtMinIndex 
+            : revenueAtMinIndex;
         
+        // 6. 计算该份额应得的分红
+        // 公式: (持有份额 / 总发行量) × 期间收益
         uint256 totalSupplyAmount = totalSupply();
         if (totalSupplyAmount == 0) return 0;
         
@@ -383,6 +534,11 @@ contract AssetToken is IAssetToken, ERC20 {
         return dividendAmount;
     }
 
+    /**
+     * @notice 添加持有者到列表
+     * @param holder 持有者地址
+     * @dev 内部函数，用于维护持有者列表
+     */
     function _addHolder(address holder) private {
         if (!isHolder[holder] && holder != address(0)) {
             holders.push(holder);
@@ -390,32 +546,58 @@ contract AssetToken is IAssetToken, ERC20 {
         }
     }
 
+    /**
+     * @notice 从持有者列表移除
+     * @param holder 持有者地址
+     * @dev 内部函数，标记为非持有者（不从数组删除以节省gas）
+     */
     function _removeHolder(address holder) private {
         if (isHolder[holder]) {
             isHolder[holder] = false;
         }
     }
 
+    /**
+     * @notice 设置支付代币地址
+     * @param _paymentToken 支付代币地址（如 USDT）
+     */
     function setPaymentToken(address _paymentToken) external {
         require(_paymentToken != address(0), "Invalid payment token");
         paymentToken = _paymentToken;
     }
 
+    /**
+     * @notice 设置抵押品金库合约地址
+     * @param _collateralVault 抵押品金库地址
+     */
     function setCollateralVault(address _collateralVault) external {
         require(_collateralVault != address(0), "Invalid collateral vault");
         collateralVault = _collateralVault;
     }
 
+    /**
+     * @notice 设置清算管理合约地址
+     * @param _liquidateManager 清算管理合约地址
+     */
     function setLiquidateManager(address _liquidateManager) external {
         require(_liquidateManager != address(0), "Invalid liquidate manager");
         liquidateManager = _liquidateManager;
     }
 
+    /**
+     * @notice 设置订单簿合约地址
+     * @param _orderBook 订单簿合约地址
+     */
     function setOrderBook(address _orderBook) external {
         require(_orderBook != address(0), "Invalid order book");
         orderBook = _orderBook;
     }
 
+    /**
+     * @notice 获取持有者的所有订单ID
+     * @param holder 持有者地址
+     * @return 订单ID数组
+     */
     function getHolderOrders(address holder) external view returns (uint256[] memory) {
         return holderOrders[holder];
     }

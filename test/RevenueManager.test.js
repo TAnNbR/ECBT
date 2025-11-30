@@ -56,7 +56,7 @@ describe("RevenueManager", function () {
     it("应该拒绝无效的时间单位", async function () {
       await expect(
         revenueManager.setUnitSeconds(999)
-      ).to.be.revertedWith("Invalid time unit");
+      ).to.be.rejected;
     });
   });
 

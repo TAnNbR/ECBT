@@ -7,7 +7,6 @@ import "./interfaces/ICollateralVault.sol";
 /**
  * @title RevenueManager
  * @notice 收益预言机 - 从指定API获取单个资产的收益数据
- * @dev Layer 5: 执行层 - 工具模块
  * 
  * 设计原则：
  * - 一个合约实例对应一个资产和一个API

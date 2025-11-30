@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";    
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /**
  * @title CollateralVault
  * @notice 抵押金库 - 管理资产提供者的抵押金
- * @dev Layer 3: 金融层
+ * @dev Layer 3: 金融层 (已移除访问控制)
  */
-contract CollateralVault is AccessControl, ReentrancyGuard {
+contract CollateralVault {
+    using SafeERC20 for IERC20;
     // 稳定币地址
     IERC20 public immutable collateralToken;
 
@@ -36,6 +35,28 @@ contract CollateralVault is AccessControl, ReentrancyGuard {
     // 可清算押金金额
     uint256 public liquidatableCollateralAmount;
 
+    // 清算百分比常量
+    uint256 public constant LIQUIDATION_PERCENTAGE = 2000; // 20%
+
+    // 事件定义
+    event FundraiseReceived(address indexed buyer, uint256 amount, uint256 totalFundraisedAmount);
+    event FundraiseWithdrawn(address indexed recipient, uint256 amount, uint256 remainingAmount);
+    event CollateralDepositedByProvider(address indexed provider, uint256 amount);
+    event CurrentRevenueUpdated(uint256 newRevenue, uint256 previousRevenue);
+    event RevenueDeposited(address indexed provider, uint256 amount, uint256 totalDepositedRevenue);
+    event RevenueTransferred(address indexed recipient, uint256 amount, uint256 remainingAvailableRevenue);
+    event LiquidatableCollateralUpdated(uint256 newAmount, uint256 increaseAmount);
+    event LiquidatableCollateralTransferred(address indexed recipient, uint256 amount, uint256 remainingAmount);
+
+    /**
+     * @notice 构造函数
+     * @param _collateralToken 抵押代币地址
+     */
+    constructor(address _collateralToken) {
+        require(_collateralToken != address(0), "Invalid collateral token");
+        collateralToken = IERC20(_collateralToken);
+    }
+
     /**
      * @notice 记录募集资金（由 AssetToken 合约调用）
      * @param buyer 购买者地址
@@ -44,7 +65,7 @@ contract CollateralVault is AccessControl, ReentrancyGuard {
     function recordFundraise(
         address buyer,
         uint256 amount
-    ) external onlyRole(ASSET_TOKEN_ROLE) {
+    ) external {
         require(buyer != address(0), "Invalid buyer");
         require(amount > 0, "Amount must be positive");
 
@@ -61,7 +82,7 @@ contract CollateralVault is AccessControl, ReentrancyGuard {
     function withdrawFundraise(
         address recipient,
         uint256 amount
-    ) external onlyRole(ADMIN_ROLE) nonReentrant {
+    ) external  {
         require(recipient != address(0), "Invalid recipient");
         require(amount > 0, "Amount must be positive");
 
@@ -79,7 +100,7 @@ contract CollateralVault is AccessControl, ReentrancyGuard {
      * @notice 资产提供者存入押金
      * @param amount 存入押金金额
      */
-    function depositCollateralByProvider(uint256 amount) external onlyRole(ASSET_PROVIDER_ROLE) nonReentrant {
+    function depositCollateralByProvider(uint256 amount) external  {
         require(amount > 0, "Amount must be positive");
 
         totalCollateralAmount += amount;
@@ -93,7 +114,7 @@ contract CollateralVault is AccessControl, ReentrancyGuard {
      * @notice 更新当前收益额
      * @param revenueIncrement 收益增额
      */
-    function updateCurrentRevenue(uint256 revenueIncrement) external onlyRole(ADMIN_ROLE) {
+    function updateCurrentRevenue(uint256 revenueIncrement) external {
         uint256 previousRevenue = currentRevenue;
         currentRevenue += revenueIncrement;
         emit CurrentRevenueUpdated(currentRevenue, previousRevenue);
@@ -103,7 +124,7 @@ contract CollateralVault is AccessControl, ReentrancyGuard {
      * @notice 资产提供者存入收益
      * @param amount 存入收益金额
      */
-    function depositRevenue(uint256 amount) external onlyRole(ASSET_PROVIDER_ROLE) nonReentrant {
+    function depositRevenue(uint256 amount) external  {
         require(amount > 0, "Amount must be positive");
 
         depositedRevenue += amount;
@@ -121,12 +142,7 @@ contract CollateralVault is AccessControl, ReentrancyGuard {
     function transferRevenue(
         address recipient,
         uint256 amount
-    ) external nonReentrant {
-        // 只允许管理员或 AssetToken 合约调用
-        require(
-            hasRole(ADMIN_ROLE, msg.sender) || hasRole(ASSET_TOKEN_ROLE, msg.sender),
-            "Caller is not admin or asset token"
-        );
+    ) external  {
         require(recipient != address(0), "Invalid recipient");
         require(amount > 0, "Amount must be positive");
 
@@ -154,9 +170,8 @@ contract CollateralVault is AccessControl, ReentrancyGuard {
     /**
      * @notice 更新可清算押金金额
      * @param increasePercentage 增加的百分比（基点，例如 2000 = 20%）
-     * @dev 只允许 LiquidateEngine 或管理员调用
      */
-    function updateLiquidatableCollateral(uint256 increasePercentage) external onlyRole(ADMIN_ROLE) {
+    function updateLiquidatableCollateral(uint256 increasePercentage) external {
         require(increasePercentage > 0 && increasePercentage <= 10000, "Invalid percentage");
         
         // 计算增加的金额 = 总押金 * 百分比 / 10000
@@ -175,7 +190,6 @@ contract CollateralVault is AccessControl, ReentrancyGuard {
      * @param totalShares 总份额
      * @param liquidationCount 清算次数
      * @return amount 实际转账金额
-     * @dev 只允许管理员或 AssetToken 合约调用
      * @dev 计算逻辑：
      *      1. 单次清算金额 = totalCollateralAmount × (LIQUIDATION_PERCENTAGE / 10000)
      *      2. 持有者应得 = (shareBase / totalShares) × 单次清算金额 × liquidationCount
@@ -185,12 +199,7 @@ contract CollateralVault is AccessControl, ReentrancyGuard {
         uint256 shareBase,
         uint256 totalShares,
         uint256 liquidationCount
-    ) external nonReentrant returns (uint256 amount) {
-        // 只允许管理员或 AssetToken 合约调用
-        require(
-            hasRole(ADMIN_ROLE, msg.sender) || hasRole(ASSET_TOKEN_ROLE, msg.sender),
-            "Caller is not admin or asset token"
-        );
+    ) external  returns (uint256 amount) {
         require(recipient != address(0), "Invalid recipient");
         require(shareBase > 0, "Share base must be positive");
         require(totalShares > 0, "Total shares must be positive");
@@ -217,41 +226,5 @@ contract CollateralVault is AccessControl, ReentrancyGuard {
         
         return amount;
     }
-
-    /**
-     * @notice 授予 AssetToken 角色
-     * @param assetToken AssetToken 合约地址
-     */
-    function grantAssetTokenRole(address assetToken) external onlyRole(ADMIN_ROLE) {
-        require(assetToken != address(0), "Invalid asset token");
-        _grantRole(ASSET_TOKEN_ROLE, assetToken);
-    }
-
-    /**
-     * @notice 撤销 AssetToken 角色
-     * @param assetToken AssetToken 合约地址
-     */
-    function revokeAssetTokenRole(address assetToken) external onlyRole(ADMIN_ROLE) {
-        _revokeRole(ASSET_TOKEN_ROLE, assetToken);
-    }
-
-    /**
-     * @notice 授予 LiquidateEngine 管理员角色
-     * @param liquidateEngine LiquidateEngine 合约地址
-     */
-    function grantLiquidateEngineRole(address liquidateEngine) external onlyRole(ADMIN_ROLE) {
-        require(liquidateEngine != address(0), "Invalid liquidate engine");
-        _grantRole(ADMIN_ROLE, liquidateEngine);
-    }
-
-    /**
-     * @notice 撤销 LiquidateEngine 管理员角色
-     * @param liquidateEngine LiquidateEngine 合约地址
-     */
-    function revokeLiquidateEngineRole(address liquidateEngine) external onlyRole(ADMIN_ROLE) {
-        _revokeRole(ADMIN_ROLE, liquidateEngine);
-    }
-
-
 }
 

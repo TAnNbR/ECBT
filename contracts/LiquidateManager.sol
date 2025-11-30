@@ -38,31 +38,100 @@ contract LiquidateManager {
     
     // 清算统计
     uint256 public liquidationCount;            // 执行清算的次数
+    uint256 public lastCheckTime;               // 上次检查时间
 
     // 清算参数
     uint256 public constant LIQUIDATION_PERCENTAGE = 2000; // 20% (基点)
 
+    // 事件
+    event QuarterlyRevenueChecked(uint256 timestamp, bool meetsExpectation, uint256 actualRevenue, uint256 expectedRevenue);
+    event LiquidationTriggered(uint256 timestamp, uint256 liquidationCount);
+    event ConfigUpdated(string configName, uint256 value);
+
+    /**
+     * @notice 构造函数
+     */
+    constructor() {
+        quarterCycleDays = 90; // 默认90天一个季度
+    }
+
+    /**
+     * @notice 设置季度预期分红金额
+     * @param _amount 预期分红金额
+     */
+    function setQuarterlyExpectedDividend(uint256 _amount) external {
+        quarterlyExpectedDividend = _amount;
+        emit ConfigUpdated("quarterlyExpectedDividend", _amount);
+    }
+
+    /**
+     * @notice 设置季度周期天数
+     * @param _days 天数
+     */
+    function setQuarterCycleDays(uint256 _days) external {
+        require(_days > 0, "Days must be positive");
+        quarterCycleDays = _days;
+        emit ConfigUpdated("quarterCycleDays", _days);
+    }
+
+    /**
+     * @notice 设置 RevenueManager 合约地址
+     * @param _revenueManager 合约地址
+     */
+    function setRevenueManager(address _revenueManager) external {
+        require(_revenueManager != address(0), "Invalid address");
+        revenueManager = _revenueManager;
+    }
+
+    /**
+     * @notice 设置 CollateralVault 合约地址
+     * @param _collateralVault 合约地址
+     */
+    function setCollateralVault(address _collateralVault) external {
+        require(_collateralVault != address(0), "Invalid address");
+        collateralVault = _collateralVault;
+    }
+
+    /**
+     * @notice 获取清算时间数组长度
+     * @return 数组长度
+     */
+    function getLiquidationTimesLength() external view returns (uint256) {
+        return liquidationTimes.length;
+    }
+
+    /**
+     * @notice 获取指定索引的清算时间
+     * @param index 索引
+     * @return 清算时间戳
+     */
+    function getLiquidationTime(uint256 index) external view returns (uint256) {
+        require(index < liquidationTimes.length, "Index out of bounds");
+        return liquidationTimes[index];
+    }
+
+    /**
+     * @notice 获取所有清算时间
+     * @return 清算时间数组
+     */
+    function getAllLiquidationTimes() external view returns (uint256[] memory) {
+        return liquidationTimes;
+    }
+
     /**
      * @notice 检查季度收益是否达到预期
-     * @param provider 资产提供者地址
-     * @param asset 资产地址
      * @dev 步骤：
      * 1. 调用 RevenueManager 查看 lastestAccumulatedRevenue
      * 2. 计算本季度实际收益并与预期收益比对
      * 3. 如果未达标，将 CollateralVault 中 20% 的押金列为可清算
      */
-    function checkQuarterlyRevenue(
-        address provider,
-        address asset
-    ) external returns (bool meetsExpectation) {
-        // 获取上次检查时间（数组最后一个元素，如果数组为空则为 0）
-        uint256 lastCheckTime = liquidationTimes.length > 0 
-            ? liquidationTimes[liquidationTimes.length - 1] 
-            : 0;
+    function checkQuarterlyRevenue() external returns (bool meetsExpectation) {
+        // 获取当前时间
+        uint256 currentLiquidateTime = block.timestamp;
         
         // 检查是否到了季度周期
         require(
-            block.timestamp >= lastCheckTime + (quarterCycleDays * 1 days),
+            currentLiquidateTime >= lastCheckTime + (quarterCycleDays * 1 days),
             "Quarter cycle not completed"
         );
 
@@ -75,20 +144,34 @@ contract LiquidateManager {
         // 3. 比对预期收益
         meetsExpectation = actualQuarterlyRevenue >= quarterlyExpectedDividend;
 
+        // 触发检查完成事件
+        emit QuarterlyRevenueChecked(
+            currentLiquidateTime,
+            meetsExpectation,
+            actualQuarterlyRevenue,
+            quarterlyExpectedDividend
+        );
+
         // 4. 如果未达标，触发清算机制
         if (!meetsExpectation) {
             // 调用 CollateralVault 更新可清算押金金额，增加总押金的 20%
             ICollateralVault(collateralVault).updateLiquidatableCollateral(LIQUIDATION_PERCENTAGE);
             
             // 记录清算时间
-            liquidationTimes.push(block.timestamp);
+            liquidationTimes.push(currentLiquidateTime);
             
             // 清算次数加 1
             liquidationCount++;
+
+            // 触发清算事件
+            emit LiquidationTriggered(currentLiquidateTime, liquidationCount);
         } 
 
         // 记录本次检查收益情况
         lastRecordedRevenue = currentAccumulatedRevenue;
+
+        // 更新上次检查时间
+        lastCheckTime = currentLiquidateTime;
         
         return meetsExpectation;
     }
@@ -98,54 +181,21 @@ contract LiquidateManager {
      * @param holdTime 持有时间（开始时间）
      * @param claimTime 取回清算份额的时间（结束时间）
      * @return count 持有期间内包含的清算时间戳数量（索引之差 + 1）
-     * @return foundFirst 是否找到第一个清算时间
-     * @return foundLast 是否找到最后一个清算时间
      * @dev 遍历 liquidationTimes 数组，计算持有期间 (holdTime, claimTime) 内的清算次数
      */
     function findLiquidationTimeRange(
         uint256 holdTime,
         uint256 claimTime
-    ) external view returns (
-        uint256 count,
-        bool foundFirst,
-        bool foundLast
-    ) {
-        // 初始化
-        uint256 firstLiquidationTime = type(uint256).max;   // 用于找最小值（内部变量）
-        uint256 lastLiquidationTime = 0;                    // 用于找最大值（内部变量）
-        uint256 firstIndex = 0;                             // 第一个清算时间的索引
-        uint256 lastIndex = 0;                              // 最后一个清算时间的索引
-        foundFirst = false;
-        foundLast = false;
-
+    ) external view returns (uint256 count) {
         // 遍历清算时间数组
         for (uint256 i = 0; i < liquidationTimes.length; i++) {
             uint256 liquidationTime = liquidationTimes[i];
             
             // 查找最小的大于 holdTime 的时间
-            if (liquidationTime > holdTime && liquidationTime < firstLiquidationTime) {
-                firstLiquidationTime = liquidationTime;
-                firstIndex = i;
-                foundFirst = true;
-            }
-            
-            // 查找最大的小于 claimTime 的时间
-            if (liquidationTime < claimTime && liquidationTime > lastLiquidationTime) {
-                lastLiquidationTime = liquidationTime;
-                lastIndex = i;
-                foundLast = true;
+            if (liquidationTime >= holdTime && liquidationTime <= claimTime) {
+                count++;
             }
         }
-
-        // 计算包含的时间戳数量（索引之差 + 1）
-        // 只有当两个都找到时才计算
-        if (foundFirst && foundLast) {
-            count = lastIndex >= firstIndex ? (lastIndex - firstIndex + 1) : 0;
-        } else {
-            count = 0;
-        }
-
-        return (count, foundFirst, foundLast);
     }
 
 }
