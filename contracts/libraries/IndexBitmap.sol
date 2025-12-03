@@ -30,8 +30,8 @@ library IndexBitmap {
     /**
      * @notice 查找范围内被标记的最小索引（第一个标记的索引）
      * @param bitmap 位图映射表
-     * @param startIndex 起始索引
-     * @param endIndex 结束索引
+     * @param startIndex 起始索引（不包含）
+     * @param endIndex 结束索引（包含）
      * @return found 是否找到
      * @return minIndex 最小索引（如果未找到则为0）
      */
@@ -43,9 +43,11 @@ library IndexBitmap {
         bool found,
         uint256 minIndex
     ) {
-        require(startIndex <= endIndex, "Invalid range");
+        require(startIndex < endIndex, "Invalid range");
         
-        uint256 startSlot = startIndex / BITS_PER_SLOT;
+        // 搜索范围是 (startIndex, endIndex]，实际起始索引是 startIndex + 1
+        uint256 actualStartIndex = startIndex + 1;
+        uint256 startSlot = actualStartIndex / BITS_PER_SLOT;
         uint256 endSlot = endIndex / BITS_PER_SLOT;
         
         // 遍历所有可能包含标记的 slot
@@ -58,7 +60,7 @@ library IndexBitmap {
             }
             
             // 计算在当前 slot 中的起始和结束位置
-            uint256 bitStart = (slot == startSlot) ? (startIndex % BITS_PER_SLOT) : 0;
+            uint256 bitStart = (slot == startSlot) ? (actualStartIndex % BITS_PER_SLOT) : 0;
             uint256 bitEnd = (slot == endSlot) ? (endIndex % BITS_PER_SLOT) : (BITS_PER_SLOT - 1);
             
             // 在当前 slot 中查找第一个被标记的位
@@ -75,8 +77,8 @@ library IndexBitmap {
     /**
      * @notice 查找范围内被标记的最大索引（最后一个标记的索引）
      * @param bitmap 位图映射表
-     * @param startIndex 起始索引
-     * @param endIndex 结束索引
+     * @param startIndex 起始索引（不包含）
+     * @param endIndex 结束索引（包含）
      * @return found 是否找到
      * @return maxIndex 最大索引（如果未找到则为0）
      */
@@ -88,9 +90,11 @@ library IndexBitmap {
         bool found,
         uint256 maxIndex
     ) {
-        require(startIndex <= endIndex, "Invalid range");
+        require(startIndex < endIndex, "Invalid range");
         
-        uint256 startSlot = startIndex / BITS_PER_SLOT;
+        // 搜索范围是 (startIndex, endIndex]，实际起始索引是 startIndex + 1
+        uint256 actualStartIndex = startIndex + 1;
+        uint256 startSlot = actualStartIndex / BITS_PER_SLOT;
         uint256 endSlot = endIndex / BITS_PER_SLOT;
         
         // 从最后一个 slot 开始向前遍历
@@ -100,7 +104,7 @@ library IndexBitmap {
             // 如果这个 slot 不为空，在其中查找
             if (slotValue != 0) {
                 // 计算在当前 slot 中的起始和结束位置
-                uint256 bitStart = (slot == startSlot) ? (startIndex % BITS_PER_SLOT) : 0;
+                uint256 bitStart = (slot == startSlot) ? (actualStartIndex % BITS_PER_SLOT) : 0;
                 uint256 bitEnd = (slot == endSlot) ? (endIndex % BITS_PER_SLOT) : (BITS_PER_SLOT - 1);
                 
                 // 从高位向低位查找最后一个被标记的位

@@ -18,5 +18,12 @@ contract AssetTokenTestHelper is AssetToken {
     ) external view returns (uint256) {
         return _calculateDividendAmount(lastDividendTime, withdrawTime, holderShares);
     }
+
+    /**
+     * @notice 设置 revenueManager 用于测试
+     */
+    function setRevenueManager(address _revenueManager) external {
+        revenueManager = _revenueManager;
+    }
 }
 

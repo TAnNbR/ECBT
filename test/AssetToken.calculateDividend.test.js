@@ -2,7 +2,7 @@ const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const { time } = require("@nomicfoundation/hardhat-network-helpers");
 
-describe("AssetToken _calculateDividendAmount 函数测试 (真实 RevenueManager)", function () {
+describe("AssetToken calculateDividendAmount 函数测试 (集成 RevenueManager)", function () {
   let assetTokenHelper;
   let revenueManager;
   let collateralVault;
@@ -73,19 +73,14 @@ describe("AssetToken _calculateDividendAmount 函数测试 (真实 RevenueManage
     const soldOutTime = await assetTokenHelper.soldOutTimestamp();
     expect(soldOutTime).to.be.greaterThan(0);
 
-    console.log("RevenueManager deployed to:", await revenueManager.getAddress());
-    console.log("AssetTokenTestHelper deployed to:", await assetTokenHelper.getAddress());
-    console.log("Sold out timestamp:", soldOutTime.toString());
   });
 
-  describe("基本功能测试", function () {
+  describe("开始持有时间在售罄时间之前", function () {
     it("应该在没有收益记录时返回 0", async function () {
       // 获取售罄时间戳
       const soldOutTime = await assetTokenHelper.soldOutTimestamp();
       
-      // 等待一段时间后设置 lastDividendTime（必须 >= soldOutTimestamp）
-      await time.increase(DAY * 5);
-      const lastDividendTime = await time.latest();
+      const lastDividendTime = Number(soldOutTime - BigInt(DAY));
       
       await time.increase(DAY * 5);
       const withdrawTime = await time.latest();
@@ -100,70 +95,107 @@ describe("AssetToken _calculateDividendAmount 函数测试 (真实 RevenueManage
       expect(result).to.equal(0);
     });
 
-    it("当 withdrawTime <= lastDividendTime 时应该返回 0", async function () {
-      await time.increase(DAY * 5);
-      const currentTime = await time.latest();
+    it("单笔收益计算", async function () {
+      // 获取售罄时间戳
+      const soldOutTime = await assetTokenHelper.soldOutTimestamp();
       
-      const result = await assetTokenHelper.calculateDividendAmountPublic(
-        currentTime,
-        currentTime - 1, // withdrawTime < lastDividendTime
-        HOLDER_SHARES
-      );
+      const lastDividendTime = Number(soldOutTime - BigInt(DAY));
 
-      expect(result).to.equal(0);
-    });
+      // 确保时间前进到 soldOutTime + DAY 之后（需要严格大于）
+      await time.increaseTo(Number(soldOutTime + BigInt(DAY)) + 1);
 
-    it("当 withdrawTime = lastDividendTime 时应该返回 0", async function () {
-      await time.increase(DAY * 5);
-      const currentTime = await time.latest();
-      
-      const result = await assetTokenHelper.calculateDividendAmountPublic(
-        currentTime,
-        currentTime, // 相等
-        HOLDER_SHARES
-      );
+      const dailyRevenue = ethers.parseUnits("1000", 6); // 每天 1000 USDT
+      await revenueManager.recordPeriodRevenue(dailyRevenue, await time.latest());
+      await time.increase(DAY);
 
-      expect(result).to.equal(0);
-    });
-
-    it("当 revenueManager 未设置时应该返回 0", async function () {
-      // 部署新的 AssetTokenTestHelper 不设置 revenueManager
-      const AssetTokenTestHelper = await ethers.getContractFactory("AssetTokenTestHelper");
-      const newHelper = await AssetTokenTestHelper.deploy();
-      await newHelper.waitForDeployment();
-
-      const metadata = {
-        name: "Test",
-        symbol: "TST",
-        totalValue: ethers.parseUnits("1000000", 6),
-        fundraiseAmount: ethers.parseUnits("500000", 6),
-        maxTotalSupply: MAX_TOTAL_SUPPLY,
-        specialPurposeVehicle: owner.address,
-        provider: provider.address,
-        createdAt: await time.latest()
-      };
-
-      await newHelper.initialize(
-        metadata,
-        await paymentToken.getAddress(),
-        await collateralVault.getAddress(),
-        ethers.ZeroAddress // 不设置 revenueManager
-      );
-
-      // 购买全部代币以触发售罄
-      const totalPayment = ethers.parseUnits("500000", 6);
-      await paymentToken.mint(provider.address, totalPayment);
-      await paymentToken.connect(provider).approve(await newHelper.getAddress(), totalPayment);
-      await newHelper.connect(provider).purchase(MAX_TOTAL_SUPPLY);
-
-      // 等待时间
-      await time.increase(DAY * 5);
-      const lastDividendTime = await time.latest();
-      
-      await time.increase(DAY * 5);
       const withdrawTime = await time.latest();
+      
+      const result = await assetTokenHelper.calculateDividendAmountPublic(
+        lastDividendTime,
+        withdrawTime,
+        HOLDER_SHARES
+      );
 
-      const result = await newHelper.calculateDividendAmountPublic(
+      const expected = (dailyRevenue * HOLDER_SHARES) / MAX_TOTAL_SUPPLY;
+      expect(result).to.equal(expected);
+    });
+
+    it("多笔收益计算", async function () {
+      // 获取售罄时间戳
+      const soldOutTime = await assetTokenHelper.soldOutTimestamp();
+      
+      const lastDividendTime = Number(soldOutTime - BigInt(DAY));
+
+      // 确保时间前进到 soldOutTime + DAY 之后（需要严格大于）
+      await time.increaseTo(Number(soldOutTime + BigInt(DAY)) + 1);
+
+      const dailyRevenue = ethers.parseUnits("1000", 6); // 每天 1000 USDT
+      for (let i = 0; i < 7; i++) {
+        await revenueManager.recordPeriodRevenue(dailyRevenue, await time.latest());
+        await time.increase(DAY);
+      }
+
+      const withdrawTime = await time.latest();
+      
+      const result = await assetTokenHelper.calculateDividendAmountPublic(
+        lastDividendTime,
+        withdrawTime,
+        HOLDER_SHARES
+      );
+
+      const expected = (dailyRevenue * BigInt(7) * HOLDER_SHARES) / MAX_TOTAL_SUPPLY;
+      expect(result).to.equal(expected);
+    });
+
+    describe("时间边界测试", function () {
+      it("收益时间等于领取分红时间", async function () {
+        // 获取售罄时间戳
+        const soldOutTime = await assetTokenHelper.soldOutTimestamp();
+        
+        const lastDividendTime = Number(soldOutTime - BigInt(DAY));
+  
+        // 确保时间前进到 soldOutTime + DAY 之后（需要严格大于）
+        await time.increaseTo(Number(soldOutTime + BigInt(DAY)) + 1);
+  
+        const revenueTime = await time.latest();
+
+        const dailyRevenue = ethers.parseUnits("1000", 6); // 每天 1000 USDT
+        await revenueManager.recordPeriodRevenue(dailyRevenue, revenueTime);
+  
+        const withdrawTime = revenueTime;
+        
+        const result = await assetTokenHelper.calculateDividendAmountPublic(
+          lastDividendTime,
+          withdrawTime,
+          HOLDER_SHARES
+        );
+  
+        const expected = (dailyRevenue * HOLDER_SHARES) / MAX_TOTAL_SUPPLY;
+        expect(result).to.equal(expected);
+      });
+    });
+
+  });
+
+  describe("开始持有时间在第一次收益时间之后", function () {
+    it("应该在没有收益记录时返回 0", async function () {
+      // 获取售罄时间戳
+      const soldOutTime = await assetTokenHelper.soldOutTimestamp();
+
+      // 确保时间前进到 soldOutTime + DAY 之后（需要严格大于）
+      await time.increaseTo(Number(soldOutTime + BigInt(DAY)) + 1);
+
+      const dailyRevenue = ethers.parseUnits("1000", 6); // 每天 1000 USDT
+      await revenueManager.recordPeriodRevenue(dailyRevenue, await time.latest());
+      await time.increase(DAY);
+
+      const lastDividendTime = await time.latest();
+
+      await time.increase(DAY);
+
+      const withdrawTime = await time.latest();
+      
+      const result = await assetTokenHelper.calculateDividendAmountPublic(
         lastDividendTime,
         withdrawTime,
         HOLDER_SHARES
@@ -171,37 +203,104 @@ describe("AssetToken _calculateDividendAmount 函数测试 (真实 RevenueManage
 
       expect(result).to.equal(0);
     });
-  });
 
-  describe("单笔收益计算", function () {
-    it("应该正确计算单笔收益的分红", async function () {
-      // 1. 售罄后等待一段时间作为起始时间
-      await time.increase(DAY * 2);
-      const startTime = await time.latest();
-      
-      await time.increase(DAY * 1);
+    it("单笔收益计算", async function () {
+      // 获取售罄时间戳
+      const soldOutTime = await assetTokenHelper.soldOutTimestamp();
 
-      // 2. 记录一笔收益
-      const revenueAmount = ethers.parseUnits("10000", 6); // 10000 USDT
-      const revenueTime = await time.latest();
-      await revenueManager.recordPeriodRevenue(revenueAmount, revenueTime);
+      // 确保时间前进到 soldOutTime + DAY 之后（需要严格大于）
+      await time.increaseTo(Number(soldOutTime + BigInt(DAY)) + 1);
 
-      // 3. 再前进一些时间
-      await time.increase(DAY * 2);
+      const dailyRevenue = ethers.parseUnits("1000", 6); // 每天 1000 USDT
+      await revenueManager.recordPeriodRevenue(dailyRevenue, await time.latest());
+      await time.increase(DAY);
+
+      const lastDividendTime = await time.latest();
+      await time.increase(DAY);
+
+      await revenueManager.recordPeriodRevenue(dailyRevenue, await time.latest());
+      await time.increase(DAY);
+
       const withdrawTime = await time.latest();
-
-      // 4. 计算分红
+      
       const result = await assetTokenHelper.calculateDividendAmountPublic(
-        startTime,
+        lastDividendTime,
         withdrawTime,
         HOLDER_SHARES
       );
 
-      // 期望：10000 USDT * (10000 / 1000000) = 100 USDT
-      const expectedDividend = (revenueAmount * HOLDER_SHARES) / MAX_TOTAL_SUPPLY;
-      expect(result).to.equal(expectedDividend);
+      const expected = (dailyRevenue * HOLDER_SHARES) / MAX_TOTAL_SUPPLY;
+
+      expect(result).to.equal(expected);
     });
 
+    it("多笔收益计算", async function () {
+      // 获取售罄时间戳
+      const soldOutTime = await assetTokenHelper.soldOutTimestamp();
+
+      // 确保时间前进到 soldOutTime + DAY 之后（需要严格大于）
+      await time.increaseTo(Number(soldOutTime + BigInt(DAY)) + 1);
+
+      const dailyRevenue = ethers.parseUnits("1000", 6); // 每天 1000 USDT
+      await revenueManager.recordPeriodRevenue(dailyRevenue, await time.latest());
+      await time.increase(DAY);
+      await revenueManager.recordPeriodRevenue(dailyRevenue, await time.latest());
+      await time.increase(DAY);
+
+      const lastDividendTime = await time.latest();
+      await time.increase(DAY);
+
+      await revenueManager.recordPeriodRevenue(dailyRevenue, await time.latest());
+      await time.increase(DAY);
+      await revenueManager.recordPeriodRevenue(dailyRevenue, await time.latest());
+      await time.increase(DAY);
+
+      const withdrawTime = await time.latest();
+      
+      const result = await assetTokenHelper.calculateDividendAmountPublic(
+        lastDividendTime,
+        withdrawTime,
+        HOLDER_SHARES
+      );
+
+      const expected = (dailyRevenue * BigInt(2) * HOLDER_SHARES) / MAX_TOTAL_SUPPLY;
+
+      expect(result).to.equal(expected);
+    });
+
+    describe("时间边界测试", function () {
+      it("收益时间等于开始持有时间，收益时间等于领取分红时间", async function () {
+        // 获取售罄时间戳
+      const soldOutTime = await assetTokenHelper.soldOutTimestamp();
+
+      // 确保时间前进到 soldOutTime + DAY 之后（需要严格大于）
+      await time.increaseTo(Number(soldOutTime + BigInt(DAY)) + 1);
+
+      const minRevenueTime = await time.latest();
+      const dailyRevenue = ethers.parseUnits("1000", 6); // 每天 1000 USDT
+      await revenueManager.recordPeriodRevenue(dailyRevenue, minRevenueTime);
+      const lastDividendTime = minRevenueTime;
+      await time.increase(DAY);
+
+      const maxRevenueTime = await time.latest();
+      await revenueManager.recordPeriodRevenue(dailyRevenue, maxRevenueTime);
+      const withdrawTime = maxRevenueTime;
+      
+      const result = await assetTokenHelper.calculateDividendAmountPublic(
+        lastDividendTime,
+        withdrawTime,
+        HOLDER_SHARES
+      );
+
+      const expected = (dailyRevenue * HOLDER_SHARES) / MAX_TOTAL_SUPPLY;
+
+      expect(result).to.equal(expected);
+      });
+    });
+
+  });
+
+  describe("精度测试", function () {
     it("应该正确处理持有者份额占比", async function () {
       // 售罄后等待
       await time.increase(DAY * 2);
@@ -232,211 +331,9 @@ describe("AssetToken _calculateDividendAmount 函数测试 (真实 RevenueManage
 
         const expected = (revenueAmount * testCase.shares) / MAX_TOTAL_SUPPLY;
         expect(result).to.equal(expected);
-        
-        console.log(`  ${testCase.percentage}: ${ethers.formatUnits(result, 6)} USDT`);
       }
     });
 
-    it("lastDividendTime 在收益记录之后应该返回 0", async function () {
-      // 售罄后等待
-      await time.increase(DAY * 2);
-      
-      // 1. 先记录收益
-      const revenueTime = await time.latest();
-      await revenueManager.recordPeriodRevenue(ethers.parseUnits("5000", 6), revenueTime);
-
-      // 2. lastDividendTime 在收益之后
-      await time.increase(DAY);
-      const lastDividendTime = await time.latest();
-      
-      await time.increase(DAY);
-      const withdrawTime = await time.latest();
-
-      const result = await assetTokenHelper.calculateDividendAmountPublic(
-        lastDividendTime,
-        withdrawTime,
-        HOLDER_SHARES
-      );
-
-      // 因为 lastDividendTime 在收益记录之后，所以没有新收益
-      expect(result).to.equal(0);
-    });
-  });
-
-  describe("多笔收益计算", function () {
-    it("应该累计多笔收益", async function () {
-      // 售罄后等待
-      await time.increase(DAY * 2);
-      const startTime = await time.latest();
-      
-      await time.increase(DAY);
-
-      // 记录第一笔收益
-      const revenue1 = ethers.parseUnits("5000", 6);
-      await revenueManager.recordPeriodRevenue(revenue1, await time.latest());
-
-      await time.increase(DAY);
-
-      // 记录第二笔收益
-      const revenue2 = ethers.parseUnits("3000", 6);
-      await revenueManager.recordPeriodRevenue(revenue2, await time.latest());
-
-      await time.increase(DAY);
-
-      // 记录第三笔收益
-      const revenue3 = ethers.parseUnits("2000", 6);
-      await revenueManager.recordPeriodRevenue(revenue3, await time.latest());
-
-      await time.increase(DAY);
-      const withdrawTime = await time.latest();
-
-      const result = await assetTokenHelper.calculateDividendAmountPublic(
-        startTime,
-        withdrawTime,
-        HOLDER_SHARES
-      );
-
-      // 期望：(5000 + 3000 + 2000) * 1% = 100 USDT
-      const totalRevenue = revenue1 + revenue2 + revenue3;
-      const expected = (totalRevenue * HOLDER_SHARES) / MAX_TOTAL_SUPPLY;
-      expect(result).to.equal(expected);
-    });
-
-    it("应该只计算时间范围内的收益", async function () {
-      // 售罄后等待
-      await time.increase(DAY * 2);
-      
-      // 记录第一笔收益（在范围外，但在售罄后）
-      await time.increase(DAY);
-      await revenueManager.recordPeriodRevenue(ethers.parseUnits("5000", 6), await time.latest());
-
-      await time.increase(DAY * 3);
-      const startTime = await time.latest(); // 从这里开始计算
-
-      await time.increase(DAY);
-      
-      // 记录第二笔收益（在范围内）
-      const revenue2 = ethers.parseUnits("3000", 6);
-      await revenueManager.recordPeriodRevenue(revenue2, await time.latest());
-
-      await time.increase(DAY);
-      const withdrawTime = await time.latest();
-
-      const result = await assetTokenHelper.calculateDividendAmountPublic(
-        startTime,
-        withdrawTime,
-        HOLDER_SHARES
-      );
-
-      // 只应该计算 revenue2
-      const expected = (revenue2 * HOLDER_SHARES) / MAX_TOTAL_SUPPLY;
-      expect(result).to.equal(expected);
-    });
-
-    it("连续多天记录收益应该正确累计", async function () {
-      // 售罄后等待
-      await time.increase(DAY * 2);
-      const startTime = await time.latest();
-      
-      await time.increase(DAY);
-
-      const dailyRevenue = ethers.parseUnits("1000", 6); // 每天 1000 USDT
-      const days = 7; // 7天
-
-      for (let i = 0; i < days; i++) {
-        await revenueManager.recordPeriodRevenue(dailyRevenue, await time.latest());
-        await time.increase(DAY);
-      }
-
-      const withdrawTime = await time.latest();
-
-      const result = await assetTokenHelper.calculateDividendAmountPublic(
-        startTime,
-        withdrawTime,
-        HOLDER_SHARES
-      );
-
-      // 7天总收益: 7000 USDT * 1% = 70 USDT
-      const totalRevenue = dailyRevenue * BigInt(days);
-      const expected = (totalRevenue * HOLDER_SHARES) / MAX_TOTAL_SUPPLY;
-      expect(result).to.equal(expected);
-      
-      console.log(`  7天累计分红: ${ethers.formatUnits(result, 6)} USDT`);
-    });
-  });
-
-  describe("时间边界测试", function () {
-    it("lastDividendTime 正好等于收益记录时间", async function () {
-      // 售罄后等待
-      await time.increase(DAY * 2);
-      
-      await time.increase(DAY);
-      const revenueTime = await time.latest();
-      
-      await revenueManager.recordPeriodRevenue(ethers.parseUnits("5000", 6), revenueTime);
-
-      await time.increase(DAY * 2);
-      const withdrawTime = await time.latest();
-
-      // lastDividendTime 等于 revenueTime
-      const result = await assetTokenHelper.calculateDividendAmountPublic(
-        revenueTime,
-        withdrawTime,
-        HOLDER_SHARES
-      );
-
-      // 应该不包含该笔收益（因为在 lastDividendTime 时已经算过了）
-      expect(result).to.equal(0);
-    });
-
-    it("withdrawTime 正好等于最后一笔收益时间", async function () {
-      // 售罄后等待
-      await time.increase(DAY * 2);
-      const startTime = await time.latest();
-      
-      await time.increase(DAY);
-
-      const revenueAmount = ethers.parseUnits("5000", 6);
-      await revenueManager.recordPeriodRevenue(revenueAmount, await time.latest());
-      
-      const withdrawTime = await time.latest(); // 就是收益记录时间
-
-      const result = await assetTokenHelper.calculateDividendAmountPublic(
-        startTime,
-        withdrawTime,
-        HOLDER_SHARES
-      );
-
-      // 应该包含这笔收益
-      const expected = (revenueAmount * HOLDER_SHARES) / MAX_TOTAL_SUPPLY;
-      expect(result).to.equal(expected);
-    });
-
-    it("非常短的时间范围", async function () {
-      // 售罄后等待
-      await time.increase(DAY * 2);
-      const startTime = await time.latest();
-      
-      // 立即记录收益
-      const revenueAmount = ethers.parseUnits("5000", 6);
-      await revenueManager.recordPeriodRevenue(revenueAmount, await time.latest());
-      
-      // 1秒后提取
-      await time.increase(1);
-      const withdrawTime = await time.latest();
-
-      const result = await assetTokenHelper.calculateDividendAmountPublic(
-        startTime,
-        withdrawTime,
-        HOLDER_SHARES
-      );
-
-      const expected = (revenueAmount * HOLDER_SHARES) / MAX_TOTAL_SUPPLY;
-      expect(result).to.equal(expected);
-    });
-  });
-
-  describe("精度测试", function () {
     it("应该正确处理小额分红", async function () {
       // 售罄后等待
       await time.increase(DAY * 2);
@@ -460,9 +357,6 @@ describe("AssetToken _calculateDividendAmount 函数测试 (真实 RevenueManage
       const expected = (smallRevenue * HOLDER_SHARES) / MAX_TOTAL_SUPPLY;
       expect(result).to.equal(expected);
       
-      if (result > 0) {
-        console.log(`  小额分红: ${ethers.formatUnits(result, 6)} USDT`);
-      }
     });
 
     it("应该正确处理大额分红", async function () {
@@ -488,7 +382,6 @@ describe("AssetToken _calculateDividendAmount 函数测试 (真实 RevenueManage
       const expected = (largeRevenue * HOLDER_SHARES) / MAX_TOTAL_SUPPLY;
       expect(result).to.equal(expected);
       
-      console.log(`  大额分红: ${ethers.formatUnits(result, 6)} USDT`);
     });
 
     it("应该正确处理精度截断", async function () {
@@ -521,6 +414,34 @@ describe("AssetToken _calculateDividendAmount 函数测试 (真实 RevenueManage
   });
 
   describe("边界条件测试", function () {
+    it("当 revenueManager 未设置时应该返回 0", async function () {
+      // 这个测试验证 _calculateDividendAmount 函数中的 revenueManager 检查
+      // 由于 purchase 需要 revenueManager，我们先用正常的 helper 购买，然后将 revenueManager 设为 0
+      
+      const soldOutTime = await assetTokenHelper.soldOutTimestamp();
+      
+      // 确保时间推进到 soldOutTime + 1 day 之后
+      await time.increaseTo(Number(soldOutTime + BigInt(DAY)) + 1);
+      
+      const lastDividendTime = await time.latest();
+      await time.increase(DAY);
+      const withdrawTime = await time.latest();
+
+      // 通过测试合约设置 revenueManager 为 0（模拟未设置的情况）
+      await assetTokenHelper.setRevenueManager(ethers.ZeroAddress);
+
+      const result = await assetTokenHelper.calculateDividendAmountPublic(
+        lastDividendTime,
+        withdrawTime,
+        HOLDER_SHARES
+      );
+
+      // 恢复 revenueManager
+      await assetTokenHelper.setRevenueManager(await revenueManager.getAddress());
+
+      expect(result).to.equal(0);
+    });
+
     it("份额为 0 时应该返回 0", async function () {
       // 售罄后等待
       await time.increase(DAY * 2);
@@ -588,34 +509,30 @@ describe("AssetToken _calculateDividendAmount 函数测试 (真实 RevenueManage
   });
 
   describe("RevenueManager 截断时间功能集成", function () {
-    it("应该正确处理按天截断的时间戳", async function () {
-      // 售罄后等待
-      await time.increase(DAY * 2);
-      const startTime = await time.latest();
+    it("第一次收益时间应该在售罄时间一天之后", async function () {
+      const soldOutTime = await assetTokenHelper.soldOutTimestamp();
       
-      await time.increase(HOUR * 6); // 前进6小时
+      // startTime 使用 soldOutTime 减去 1 天
+      const startTime = Number(soldOutTime - BigInt(DAY));
 
       // 记录收益（时间戳会被截断到天）
       const revenueAmount = ethers.parseUnits("5000", 6);
-      const recordTime = await time.latest();
-      await revenueManager.recordPeriodRevenue(revenueAmount, recordTime);
 
-      // 验证时间戳确实被截断了
-      const truncatedTime = recordTime - (recordTime % DAY);
-      const isRecorded = await revenueManager.isTimestampRecorded(truncatedTime);
-      expect(isRecorded).to.be.true;
-
+      // 假设 soldOutTime + 6 小时不超过第二天 0 点
+      await revenueManager.recordPeriodRevenue(revenueAmount, Number(soldOutTime) + 6 * HOUR);
       await time.increase(DAY);
+
       const withdrawTime = await time.latest();
 
-      const result = await assetTokenHelper.calculateDividendAmountPublic(
-        startTime,
-        withdrawTime,
-        HOLDER_SHARES
-      );
-
-      const expected = (revenueAmount * HOLDER_SHARES) / MAX_TOTAL_SUPPLY;
-      expect(result).to.equal(expected);
+      // 由于 onlySoldOut 修饰符要求 block.timestamp > soldOutTimestamp + 1 days
+      // 当前时间不满足要求，应该 revert
+      await expect(
+        assetTokenHelper.calculateDividendAmountPublic(
+          startTime,
+          withdrawTime,
+          HOLDER_SHARES
+        )
+      ).to.be.revertedWith("Token not sold out yet");
     });
 
     it("同一天内多次记录收益应该累计", async function () {
@@ -677,7 +594,6 @@ describe("AssetToken _calculateDividendAmount 函数测试 (真实 RevenueManage
         HOLDER_SHARES
       );
 
-      console.log(`  单笔收益 Gas 消耗: ${gasEstimate.toString()}`);
       
       // Gas 应该在合理范围内（使用 findMaxMarkedIndex 会消耗较多 gas）
       expect(gasEstimate).to.be.lessThan(3000000n);
@@ -704,7 +620,6 @@ describe("AssetToken _calculateDividendAmount 函数测试 (真实 RevenueManage
         HOLDER_SHARES
       );
 
-      console.log(`  10笔收益 Gas 消耗: ${gasEstimate.toString()}`);
       
       // 多笔收益的 gas 消耗不应该线性增长
       expect(gasEstimate).to.be.lessThan(3000000n);

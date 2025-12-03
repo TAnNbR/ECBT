@@ -86,17 +86,27 @@ contract AssetToken is IAssetToken, ERC20 {
     // 剩余可铸造供应量，初始值为 maxTotalSupply，每次 purchase 后递减
     uint256 public remainingMintableSupply;
 
-    // 供应量耗尽时间戳（售罄时间），0 表示尚未售罄
+    /// @notice 供应量耗尽（售罄）时间戳
+    /// @dev 未截断的完整时间戳，0表示尚未售罄
     uint256 public soldOutTimestamp;
 
     // ============ 修饰符 ============
 
     /**
      * @notice 检查代币是否已售罄
+     * @dev 要求 soldOutTimestamp 为 0，即代币供应量未完全耗尽
+     */
+    modifier onlyNotSoldOut() {
+        require(soldOutTimestamp == 0, "Token sold out yet");
+        _;
+    }
+
+    /**
+     * @notice 检查代币是否已售罄
      * @dev 要求 soldOutTimestamp 不为 0，即代币供应量已完全耗尽
      */
     modifier onlySoldOut() {
-        require(soldOutTimestamp != 0, "Token not sold out yet");
+        require(soldOutTimestamp != 0 && block.timestamp > (soldOutTimestamp + 1 days), "Token not sold out yet");
         _;
     }
 
@@ -149,7 +159,7 @@ contract AssetToken is IAssetToken, ERC20 {
      *      3. 铸造资产代币给购买者
      *      4. 创建持有者信息记录
      */
-    function purchase(uint256 amount) external {
+    function purchase(uint256 amount) external onlyNotSoldOut() {
         // 1. 验证购买数量
         require(amount > 0, "Amount must be greater than 0");
         require(remainingMintableSupply >= amount, "Insufficient remaining supply");
@@ -172,22 +182,22 @@ contract AssetToken is IAssetToken, ERC20 {
         // 5. 更新剩余可铸造数量
         remainingMintableSupply -= amount;
         
-        // 6. 如果供应量耗尽，记录售罄时间戳
-        if (remainingMintableSupply == 0 && soldOutTimestamp == 0) {
-            soldOutTimestamp = block.timestamp;
-        }
-        
-        // 7. 将购买者添加到持有者列表
+        // 6. 将购买者添加到持有者列表
         _addHolder(msg.sender);
         
-        // 8. 创建持有者信息记录
+        // 7. 创建持有者信息记录
         // 初始时分红和清算时间都设为 INVALID_TIMESTAMP，表示从未领取
         holderInfo[msg.sender].push(HolderInfo({
             shares: amount,
-            holdingStartTime: block.timestamp,
+            holdingStartTime: IRevenueManager(revenueManager).truncateTimestampBySeconds(block.timestamp),
             lastDividendTime: INVALID_TIMESTAMP,
             lastLiquidationClaimTime: INVALID_TIMESTAMP
         }));
+
+        // 8. 如果供应量耗尽，记录售罄时间戳
+        if (remainingMintableSupply == 0 && soldOutTimestamp == 0) {
+            soldOutTimestamp = block.timestamp + 1 days;
+        }
     }
 
     /**
@@ -497,32 +507,44 @@ contract AssetToken is IAssetToken, ERC20 {
     ) internal onlySoldOut() view returns (uint256 dividendAmount) {
         // 安全检查
         if (revenueManager == address(0)) return 0;
-        if (withdrawTime <= lastDividendTime) return 0;
+        if (withdrawTime <= lastDividendTime) return 0; 
         
-        // 1. 获取 lastDividendTime 之前或当时的累计收益
-        (bool foundStart, uint256 startIndex) = IRevenueManager(revenueManager).findMaxMarkedIndex(
-            soldOutTimestamp,
-            lastDividendTime
-        );
-        
-        // 2. 查找时间范围内的最大索引（最晚的收益记录）
-        (bool foundMax, uint256 maxIndex) = IRevenueManager(revenueManager).findMaxMarkedIndex(
-            lastDividendTime,
-            withdrawTime
-        );
+        // 查找lastDividendTime（分红起始时间）前的最近累计收益索引
+        bool foundStart;
+        bool foundEnd;
+        uint256 startIndex;
+        uint256 endIndex;
+        if(lastDividendTime < soldOutTimestamp) {
+            // 如果分红起始时间早于售罄时间，则视为未找到有效起始索引
+            foundStart = false;
+
+            // 查找时间范围内的最大索引（最晚的收益记录）
+            (foundEnd, endIndex) = IRevenueManager(revenueManager).findMaxMarkedIndex(
+                soldOutTimestamp,
+                withdrawTime
+            );
+        } else {
+            // 在revenueManager中查找介于售罄时间和lastDividendTime之间的最新收益记录的索引
+            (foundStart, startIndex) = IRevenueManager(revenueManager).findMaxMarkedIndex(
+                soldOutTimestamp,
+                lastDividendTime
+            );
+            // 查找时间范围内的最大索引（最晚的收益记录）
+            (foundEnd, endIndex) = IRevenueManager(revenueManager).findMaxMarkedIndex(
+                lastDividendTime,
+                withdrawTime
+            );
+        }
         
         // 3. 如果没有找到收益记录，返回0
-        if (!foundStart && !foundMax) return 0;
+        if (!foundEnd) return 0;
         
         // 4. 获取两个时间点的累计收益
         uint256 revenueAtMinIndex = foundStart ? IRevenueManager(revenueManager).getAccumulatedRevenueAt(startIndex) : 0;
-        uint256 revenueAtMaxIndex = foundMax   ? IRevenueManager(revenueManager).getAccumulatedRevenueAt(maxIndex)   : 0;
+        uint256 revenueAtMaxIndex = foundEnd   ? IRevenueManager(revenueManager).getAccumulatedRevenueAt(endIndex)   : 0;
         
         // 5. 计算期间总收益（累计收益的差值）
-        uint256 periodRevenue = 
-            revenueAtMaxIndex > revenueAtMinIndex 
-            ? revenueAtMaxIndex - revenueAtMinIndex 
-            : revenueAtMinIndex;
+        uint256 periodRevenue = revenueAtMaxIndex - revenueAtMinIndex ;
         
         // 6. 计算该份额应得的分红
         // 公式: (持有份额 / 总发行量) × 期间收益

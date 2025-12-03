@@ -103,7 +103,10 @@ contract RevenueManager {
         uint256 startIndex,
         uint256 endIndex
     ) public view returns (bool found, uint256 minIndex) {
-        return revenueIndexBitmap.findMinMarked(startIndex, endIndex);
+        // 对传入的时间戳进行截断，以匹配存储时的截断方式
+        uint256 truncatedStart = truncateTimestampBySeconds(startIndex);
+        uint256 truncatedEnd = truncateTimestampBySeconds(endIndex);
+        return revenueIndexBitmap.findMinMarked(truncatedStart, truncatedEnd);
     }
     
     /**
@@ -117,7 +120,10 @@ contract RevenueManager {
         uint256 startIndex,
         uint256 endIndex
     ) public view returns (bool found, uint256 maxIndex) {
-        return revenueIndexBitmap.findMaxMarked(startIndex, endIndex);
+        // 对传入的时间戳进行截断，以匹配存储时的截断方式
+        uint256 truncatedStart = truncateTimestampBySeconds(startIndex);
+        uint256 truncatedEnd = truncateTimestampBySeconds(endIndex);
+        return revenueIndexBitmap.findMaxMarked(truncatedStart, truncatedEnd);
     }
 
     /**
@@ -139,7 +145,7 @@ contract RevenueManager {
      */
     function truncateTimestampBySeconds(
         uint256 timestamp
-    ) internal view returns (uint256) {
+    ) public view returns (uint256) {
         return timestamp - (timestamp % unitSeconds);
     }
 

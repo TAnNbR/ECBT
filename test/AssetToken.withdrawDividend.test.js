@@ -90,11 +90,11 @@ describe("AssetToken withdrawDividend 集成测试 (真实合约)", function () 
     // 7. 设置 LiquidateManager 到 AssetToken
     await assetToken.setLiquidateManager(await liquidateManager.getAddress());
 
-    console.log("PaymentToken deployed to:", await paymentToken.getAddress());
-    console.log("CollateralVault deployed to:", await collateralVault.getAddress());
-    console.log("RevenueManager deployed to:", await revenueManager.getAddress());
-    console.log("LiquidateManager deployed to:", await liquidateManager.getAddress());
-    console.log("AssetToken deployed to:", await assetToken.getAddress());
+    // console.log("PaymentToken deployed to:", await paymentToken.getAddress());
+    // console.log("CollateralVault deployed to:", await collateralVault.getAddress());
+    // console.log("RevenueManager deployed to:", await revenueManager.getAddress());
+    // console.log("LiquidateManager deployed to:", await liquidateManager.getAddress());
+    // console.log("AssetToken deployed to:", await assetToken.getAddress());
   });
 
   describe("基本分红提取功能", function () {

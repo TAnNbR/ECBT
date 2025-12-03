@@ -41,6 +41,13 @@ interface IRevenueManager {
     ) external view returns (bool found, uint256 previousIndex);
 
     /**
+     * @notice 截断时间戳到单位秒
+     * @param timestamp 时间戳
+     * @return 截断后的时间戳
+     */
+    function truncateTimestampBySeconds(uint256 timestamp) external view returns (uint256);
+
+    /**
      * @notice 查看某个时间戳的累计收益
      * @param timestamp 时间戳
      * @return 该时间戳对应的累计收益（带精度）
