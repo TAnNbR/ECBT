@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "./interfaces/IAssetToken.sol";
 import "./interfaces/ICollateralVault.sol";
 import "./interfaces/IRevenueManager.sol";
@@ -223,9 +224,10 @@ contract AssetToken is IAssetToken, ERC20 {
         uint256 withdrawTime = block.timestamp;
         
         // 初始化累计变量
-        uint256 dividendAmount = 0;         // 总分红金额
-        uint256 totalLiquidationCount = 0;  // 总清算次数
-        uint256 totalShares = 0;            // 总份额
+        uint256 dividendAmount = 0;           // 总分红金额
+        uint256 totalLiquidationAmount = 0;   // 总清算金额
+        uint256 totalShares = 0;              // 总份额
+        uint256 totalSupplyAmount = totalSupply(); // 代币总供应量
         
         // 遍历持有者的所有份额信息（可能有多个不同时间购买的份额）
         for (uint256 i = 0; i < holderInfo[holder].length; i++) {
@@ -250,11 +252,18 @@ contract AssetToken is IAssetToken, ERC20 {
                 dividendAmount += shareDividend;
             }
 
-            // 计算该份额期间的清算次数
+            // 计算该份额期间的清算金额
             if (withdrawTime > lastClaimTime && liquidateManager != address(0)) {
-                uint256 liquidationCount = ILiquidateManager(liquidateManager).findLiquidationTimeRange(lastClaimTime, withdrawTime);
-                if (liquidationCount > 0) {
-                    totalLiquidationCount += liquidationCount;
+                uint256 liquidationCount = ILiquidateManager(liquidateManager).findLiquidationTimeRange(lastClaimTime);
+                if (liquidationCount > 0 && collateralVault != address(0)) {
+                    // 为每个份额单独计算清算金额
+                    uint256 shareLiquidation = ICollateralVault(collateralVault).transferLiquidatableCollateral(
+                        recipient,
+                        info.shares,
+                        totalSupplyAmount,
+                        liquidationCount
+                    );
+                    totalLiquidationAmount += shareLiquidation;
                 }
             }
 
@@ -265,17 +274,6 @@ contract AssetToken is IAssetToken, ERC20 {
         // 转移分红到接收者
         if (dividendAmount > 0 && collateralVault != address(0)) {
             ICollateralVault(collateralVault).transferRevenue(recipient, dividendAmount);
-        }
-
-        // 转移清算金到接收者
-        if (totalLiquidationCount > 0 && collateralVault != address(0)) {
-            uint256 totalSupplyAmount = totalSupply();
-            ICollateralVault(collateralVault).transferLiquidatableCollateral(
-                recipient,
-                totalShares,
-                totalSupplyAmount,
-                totalLiquidationCount
-            );
         }
         
         // 合并所有份额：删除旧记录，创建单一的新记录
@@ -300,8 +298,9 @@ contract AssetToken is IAssetToken, ERC20 {
      * @dev 执行流程:
      *      1. 先提取所有分红和清算金，合并所有份额
      *      2. 授权 OrderBook 可以转移代币
-     *      3. 冻结相应数量的份额
-     *      4. 在 OrderBook 创建卖单
+     *      3. 从持有份额中减去出售的数量
+     *      4. 冻结相应数量的份额
+     *      5. 在 OrderBook 创建卖单
      */
     function sellShares(
         uint256 amount,
@@ -312,6 +311,8 @@ contract AssetToken is IAssetToken, ERC20 {
         require(amount > 0, "Amount must be greater than 0");
         require(price > 0, "Price must be greater than 0");
         require(orderBook != address(0), "OrderBook not set");
+
+        
 
         // 2. 先提取所有可领取的分红和清算金，并合并所有份额
         // 这样确保卖家不会错过任何收益
@@ -329,22 +330,26 @@ contract AssetToken is IAssetToken, ERC20 {
             allowance(msg.sender, address(this)) + amount
         );
         
-        // 5. 冻结相应份额，防止重复出售
+        // 5. 从持有份额中减去出售的数量
+        info.shares -= amount;
+        
+        // 6. 冻结相应份额，防止重复出售
         frozenAmounts[msg.sender] += amount;
         
-        // 6. 获取卖方当前的分红和清算时间，传给订单簿
+        // 7. 获取卖方当前的分红和清算时间，传给订单簿
         uint256 lastDividendTime = info.lastDividendTime;
         uint256 lastClaimTime = info.lastLiquidationClaimTime;
         
-        // 7. 在 OrderBook 创建卖单
+        // 8. 在 OrderBook 创建卖单
         uint256 orderId = IOrderBook(orderBook).createSellOrder(
+            msg.sender,  // 传递实际的卖方地址
             amount, 
             price, 
             lastDividendTime,
             lastClaimTime
         );
         
-        // 8. 记录订单到持有者的订单列表
+        // 9. 记录订单到持有者的订单列表
         holderOrders[msg.sender].push(orderId);
         
         return orderId;
@@ -356,7 +361,8 @@ contract AssetToken is IAssetToken, ERC20 {
      * @dev 执行流程:
      *      1. 验证订单所有权和状态
      *      2. 取消订单
-     *      3. 恢复持有者信息，保留订单创建时的分红和清算时间
+     *      3. 解除冻结
+     *      4. 恢复持有者信息，保留订单创建时的分红和清算时间
      */
     function cancelOrder(uint256 orderId) external {
         require(orderBook != address(0), "OrderBook not set");
@@ -380,7 +386,10 @@ contract AssetToken is IAssetToken, ERC20 {
         // 5. 调用 OrderBook 取消订单
         orderBook_.cancelOrder(orderId);
         
-        // 6. 恢复持有者信息，添加取消订单的份额
+        // 6. 解除冻结
+        frozenAmounts[msg.sender] -= refundAmount;
+        
+        // 7. 恢复持有者信息，添加取消订单的份额
         // 保留订单创建时的分红和清算时间，以便正确计算期间收益
         if (refundAmount > 0) {
             holderInfo[msg.sender].push(
@@ -445,8 +454,7 @@ contract AssetToken is IAssetToken, ERC20 {
         // 5. 计算并转移期间清算金给卖家
         if (currentTime > orderLastLiquidationClaimTime && orderLastLiquidationClaimTime != INVALID_TIMESTAMP && liquidateManager != address(0)) {
             uint256 liquidationCount = ILiquidateManager(liquidateManager).findLiquidationTimeRange(
-                orderLastLiquidationClaimTime,
-                currentTime
+                orderLastLiquidationClaimTime
             );
             
             if (liquidationCount > 0 && collateralVault != address(0)) {
@@ -462,7 +470,18 @@ contract AssetToken is IAssetToken, ERC20 {
         
         // 6. 买家支付稳定币给卖家
         // 支付金额 = 购买数量 × 单价
+        // price 是以 18 位精度表示的单价（例如 0.5 * 1e18）
+        // purchaseAmount 是 18 位精度的份额数量
+        // 需要除以 1e18 得到以 paymentToken 精度表示的金额
+        // 然后根据 paymentToken 的精度进行调整
         uint256 paymentAmount = (purchaseAmount * order.price) / 1e18;
+        
+        // 调整精度：从 18 位转换到 paymentToken 精度
+        uint8 paymentDecimals = IERC20Metadata(paymentToken).decimals();
+        if (paymentDecimals < 18) {
+            paymentAmount = paymentAmount / (10 ** (18 - paymentDecimals));
+        }
+        
         require(paymentAmount > 0, "Payment amount is zero");
         require(paymentToken != address(0), "Payment token not set");
         require(

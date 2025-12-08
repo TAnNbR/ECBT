@@ -45,6 +45,15 @@ contract RevenueManager {
     address public collateralVault;
 
     /**
+     * @notice 设置 CollateralVault 合约地址
+     * @param _collateralVault CollateralVault 合约地址
+     */
+    function setCollateralVault(address _collateralVault) public {
+        require(_collateralVault != address(0), "Invalid collateral vault address");
+        collateralVault = _collateralVault;
+    }
+
+    /**
      * @notice 设置时间单位
      * @param unit 时间单位（MINUTE/HOUR/DAY/WEEK）
      * @dev 根据枚举值设置 unitSeconds 状态变量

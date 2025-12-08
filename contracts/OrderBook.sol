@@ -33,6 +33,7 @@ contract OrderBook {
     uint256 public nextOrderId;                         // 下一个订单ID
     mapping(uint256 => Order) public orders;            // 订单映射
     mapping(address => uint256[]) public userOrders;    // 用户订单列表
+    address public assetToken;                          // AssetToken 合约地址
 
     // 手续费设置（基点，10000 = 100%）
     uint256 public feeRate;                         // 手续费率（例如 30 = 0.3%）
@@ -82,18 +83,32 @@ contract OrderBook {
     }
 
     /**
+     * @notice 设置 AssetToken 合约地址
+     * @param _assetToken AssetToken 合约地址
+     */
+    function setAssetToken(address _assetToken) external {
+        require(_assetToken != address(0), "Invalid asset token");
+        require(assetToken == address(0), "AssetToken already set");
+        assetToken = _assetToken;
+    }
+
+    /**
      * @notice 创建卖单
+     * @param seller 实际卖方地址
      * @param amount 卖出数量
      * @param price 单价（稳定币，精度18位）
      * @param lastDividendTime 卖方在创建订单时的上次分红时间
+     * @param lastLiquidationClaimTime 卖方在创建订单时的上次领取清算金时间
      * @return orderId 订单ID
      */
     function createSellOrder(
+        address seller,
         uint256 amount,
         uint256 price,
         uint256 lastDividendTime,
         uint256 lastLiquidationClaimTime
     ) external returns (uint256) {
+        require(seller != address(0), "Invalid seller");
         require(amount > 0, "Amount must be greater than 0");
         require(price > 0, "Price must be greater than 0");
 
@@ -101,7 +116,7 @@ contract OrderBook {
         uint256 orderId = nextOrderId++;
         orders[orderId] = Order({
             orderId: orderId,
-            seller: msg.sender,
+            seller: seller,
             amount: amount,
             price: price,
             filledAmount: 0,
@@ -111,9 +126,9 @@ contract OrderBook {
             lastLiquidationClaimTime: lastLiquidationClaimTime
         });
 
-        userOrders[msg.sender].push(orderId);
+        userOrders[seller].push(orderId);
 
-        emit OrderCreated(orderId, msg.sender, amount, price);
+        emit OrderCreated(orderId, seller, amount, price);
 
         return orderId;
     }
@@ -153,11 +168,16 @@ contract OrderBook {
     /**
      * @notice 取消订单
      * @param orderId 订单ID
+     * @dev 可以由订单所有者或 AssetToken 合约调用
      */
     function cancelOrder(uint256 orderId) external {
         Order storage order = orders[orderId];
         
-        require(order.seller == msg.sender, "Not order owner");
+        // 如果调用者是 AssetToken 合约，信任其权限检查
+        // 否则检查调用者是否为订单所有者
+        if (msg.sender != assetToken) {
+            require(order.seller == msg.sender, "Not order owner");
+        }
         require(order.status == OrderStatus.Active, "Order not active");
 
         uint256 refundAmount = order.amount - order.filledAmount;

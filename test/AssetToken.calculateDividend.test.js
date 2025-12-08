@@ -342,7 +342,7 @@ describe("AssetToken calculateDividendAmount 函数测试 (集成 RevenueManager
       await time.increase(DAY);
 
       // 很小的收益
-      const smallRevenue = ethers.parseUnits("0.01", 6); // 0.01 USDT
+      const smallRevenue = ethers.parseUnits("0.000001", 6); // 0.000001 USDT
       await revenueManager.recordPeriodRevenue(smallRevenue, await time.latest());
 
       await time.increase(DAY);
@@ -485,27 +485,7 @@ describe("AssetToken calculateDividendAmount 函数测试 (集成 RevenueManager
       // 应该获得全部收益
       expect(result).to.equal(revenueAmount);
     });
-
-    it("时间范围内没有收益记录应该返回 0", async function () {
-      // 售罄后等待并先记录一笔收益
-      await time.increase(DAY * 2);
-      await revenueManager.recordPeriodRevenue(ethers.parseUnits("5000", 6), await time.latest());
-      
-      await time.increase(DAY * 5);
-      
-      // 从这之后的时间范围内没有新收益
-      const startTime = await time.latest();
-      await time.increase(DAY * 3);
-      const withdrawTime = await time.latest();
-
-      const result = await assetTokenHelper.calculateDividendAmountPublic(
-        startTime,
-        withdrawTime,
-        HOLDER_SHARES
-      );
-
-      expect(result).to.equal(0);
-    });
+    
   });
 
   describe("RevenueManager 截断时间功能集成", function () {

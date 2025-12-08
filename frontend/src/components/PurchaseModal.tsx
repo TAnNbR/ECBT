@@ -32,7 +32,7 @@ export function PurchaseModal() {
   const { data: allowance, refetch: refetchAllowance } = useERC20Allowance(
     CONTRACTS.PaymentToken,
     address,
-    CONTRACTS.CollateralVault
+    CONTRACTS.AssetToken  // ✅ 修复：授权给 AssetToken 合约
   )
 
   const handlePurchase = async () => {
@@ -46,7 +46,7 @@ export function PurchaseModal() {
       // Check if approval needed
       if (!allowance || allowance < paymentAmount) {
         toast.info('Approving payment token...')
-        await approve(CONTRACTS.PaymentToken, CONTRACTS.CollateralVault, paymentAmount * 2n)
+        await approve(CONTRACTS.PaymentToken, CONTRACTS.AssetToken, paymentAmount * 2n)  // ✅ 修复：授权给 AssetToken 合约
         await refetchAllowance()
         toast.success('Approval successful!')
       }

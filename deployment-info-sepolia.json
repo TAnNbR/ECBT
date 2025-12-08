@@ -1,0 +1,24 @@
+{
+  "network": "sepolia",
+  "chainId": 11155111,
+  "timestamp": "2025-12-08T14:14:03.196Z",
+  "contracts": {
+    "MockERC20": "0x330B720DB097B3430473e2AA580E513428a8788F",
+    "CollateralVault": "0xc22634bf53E738EDb44905Ea505b493B654A46C9",
+    "RevenueManager": "0xbD4C8CF76C5Cc5ff37d5F62492867b38501965B0",
+    "LiquidateManager": "0x1F16d57b70436769e70509EfaA80eA06FA09471c",
+    "OrderBook": "0xAAF8aC69Dad9Deb1ba0ba7f0102a0274c2320a3f",
+    "AssetToken": "0x947156A3d5476d966EA37Fa731d795a9b3539f59"
+  },
+  "accounts": {
+    "deployer": "0x58ac06617D42bCa05D958d7Ee314f621FD8C16b7",
+    "provider": "0x58ac06617D42bCa05D958d7Ee314f621FD8C16b7"
+  },
+  "assetInfo": {
+    "name": "Real Estate Token Sepolia",
+    "symbol": "RETS",
+    "totalValue": "1000000.0",
+    "fundraiseAmount": "500000.0",
+    "maxTotalSupply": "1000000.0"
+  }
+}

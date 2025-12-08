@@ -2,6 +2,7 @@
 
 import { Header } from '@/components/Header'
 import { AssetOverview } from '@/components/AssetOverview'
+import { RevenueInfo } from '@/components/RevenueInfo'
 import { PurchaseModal } from '@/components/PurchaseModal'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -39,6 +40,11 @@ export default function Home() {
       <section className="container py-12">
         <h2 className="text-3xl font-bold mb-8">Current Asset</h2>
         <AssetOverview />
+      </section>
+
+      {/* Revenue Information */}
+      <section className="container py-12 bg-muted/50">
+        <RevenueInfo />
       </section>
 
       {/* Features */}

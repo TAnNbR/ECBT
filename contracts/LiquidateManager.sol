@@ -52,7 +52,7 @@ contract LiquidateManager {
      * @notice 构造函数
      */
     constructor() {
-        quarterCycleDays = 90; // 默认90天一个季度
+        quarterCycleDays = 7; // 默认90天一个季度
     }
 
     /**
@@ -179,20 +179,18 @@ contract LiquidateManager {
     /**
      * @notice 查找持有期间内的清算次数
      * @param holdTime 持有时间（开始时间）
-     * @param claimTime 取回清算份额的时间（结束时间）
      * @return count 持有期间内包含的清算时间戳数量（索引之差 + 1）
      * @dev 遍历 liquidationTimes 数组，计算持有期间 (holdTime, claimTime) 内的清算次数
      */
     function findLiquidationTimeRange(
-        uint256 holdTime,
-        uint256 claimTime
+        uint256 holdTime
     ) external view returns (uint256 count) {
         // 遍历清算时间数组
         for (uint256 i = 0; i < liquidationTimes.length; i++) {
             uint256 liquidationTime = liquidationTimes[i];
             
             // 查找最小的大于 holdTime 的时间
-            if (liquidationTime >= holdTime && liquidationTime <= claimTime) {
+            if (liquidationTime >= holdTime) {
                 count++;
             }
         }

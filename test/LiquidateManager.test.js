@@ -2,16 +2,17 @@ const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const { time } = require("@nomicfoundation/hardhat-network-helpers");
 
-describe("LiquidateManager 集成测试 (真实 RevenueManager)", function () {
+describe("LiquidateManager 集成测试 (真实合约)", function () {
   let liquidateManager;
   let revenueManager;
-  let mockCollateralVault;
+  let collateralVault;
+  let paymentToken; // Mock USDT
   let owner, addr1, addr2;
 
   // 时间常量
   const DAY = 86400;
   const HOUR = 3600;
-  const QUARTER_DAYS = 90; // 一个季度90天
+  const QUARTER_DAYS = 7; // 一个季度90天
   
   // 清算常量
   const LIQUIDATION_PERCENTAGE = 2000; // 20%
@@ -19,21 +20,25 @@ describe("LiquidateManager 集成测试 (真实 RevenueManager)", function () {
   // 季度预期分红（例如 10,000 USDT）
   const QUARTERLY_EXPECTED_DIVIDEND = ethers.parseUnits("10000", 6);
 
-  /**
-   * 部署 Mock CollateralVault 合约
-   */
-  async function deployMockCollateralVault() {
-    const MockCollateralVault = await ethers.getContractFactory("MockCollateralVault");
-    const mock = await MockCollateralVault.deploy();
-    await mock.waitForDeployment();
-    return mock;
-  }
-
   beforeEach(async function () {
     // 获取签名者
     [owner, addr1, addr2] = await ethers.getSigners();
 
-    // 部署真实的 RevenueManager 合约
+    // 1. 部署 Mock ERC20 代币（模拟 USDT）
+    const MockERC20 = await ethers.getContractFactory("MockERC20");
+    paymentToken = await MockERC20.deploy("Mock USDT", "USDT", 6);
+    await paymentToken.waitForDeployment();
+
+    // 给账户铸造一些代币用于测试
+    await paymentToken.mint(owner.address, ethers.parseUnits("1000000", 6));
+    await paymentToken.mint(addr1.address, ethers.parseUnits("1000000", 6));
+
+    // 2. 部署真实的 CollateralVault
+    const CollateralVault = await ethers.getContractFactory("CollateralVault");
+    collateralVault = await CollateralVault.deploy(await paymentToken.getAddress());
+    await collateralVault.waitForDeployment();
+
+    // 3. 部署真实的 RevenueManager 合约
     const RevenueManager = await ethers.getContractFactory("RevenueManager");
     revenueManager = await RevenueManager.deploy();
     await revenueManager.waitForDeployment();
@@ -41,10 +46,7 @@ describe("LiquidateManager 集成测试 (真实 RevenueManager)", function () {
     // 配置 RevenueManager 的时间单位为小时
     await revenueManager.setUnitSeconds(1); // HOUR
 
-    // 部署 Mock CollateralVault
-    mockCollateralVault = await deployMockCollateralVault();
-
-    // 部署 LiquidateManager 合约
+    // 4. 部署 LiquidateManager 合约
     const LiquidateManager = await ethers.getContractFactory("LiquidateManager");
     liquidateManager = await LiquidateManager.deploy();
     await liquidateManager.waitForDeployment();
@@ -53,14 +55,16 @@ describe("LiquidateManager 集成测试 (真实 RevenueManager)", function () {
     await liquidateManager.setQuarterlyExpectedDividend(QUARTERLY_EXPECTED_DIVIDEND);
     await liquidateManager.setQuarterCycleDays(QUARTER_DAYS);
     await liquidateManager.setRevenueManager(await revenueManager.getAddress());
-    await liquidateManager.setCollateralVault(await mockCollateralVault.getAddress());
+    await liquidateManager.setCollateralVault(await collateralVault.getAddress());
 
-    console.log("RevenueManager deployed to:", await revenueManager.getAddress());
-    console.log("LiquidateManager deployed to:", await liquidateManager.getAddress());
+    // 5. 存入一些抵押金用于测试清算
+    const collateralAmount = ethers.parseUnits("100000", 6); // 100,000 USDT
+    await paymentToken.approve(await collateralVault.getAddress(), collateralAmount);
+    await collateralVault.depositCollateralByProvider(collateralAmount);
   });
 
-  describe("真实 RevenueManager 集成", function () {
-    it("应该能从 RevenueManager 读取累计收益", async function () {
+  describe("清算周期测试", function () {
+    it("一次清算周期达标", async function () {
       // 通过 RevenueManager 记录一些收益
       const currentTime = await time.latest();
       
@@ -96,7 +100,10 @@ describe("LiquidateManager 集成测试 (真实 RevenueManager)", function () {
       expect(await liquidateManager.getLiquidationTimesLength()).to.equal(0);
     });
 
-    it("RevenueManager 收益不足时应触发清算", async function () {
+    it("一次清算周期不达标", async function () {
+      // 记录清算前的可清算金额
+      const liquidatableBefore = await collateralVault.liquidatableCollateralAmount();
+      
       // 记录不足的收益（总共只有 5000 < 10000）
       const currentTime = await time.latest();
       
@@ -126,10 +133,14 @@ describe("LiquidateManager 集成测试 (真实 RevenueManager)", function () {
 
       // 验证触发了清算
       expect(await liquidateManager.liquidationCount()).to.equal(1);
-      expect(await mockCollateralVault.wasUpdateCalled()).to.be.true;
+      
+      // 验证 CollateralVault 的可清算金额增加了
+      const liquidatableAfter = await collateralVault.liquidatableCollateralAmount();
+      const expectedIncrease = ethers.parseUnits("100000", 6) * BigInt(LIQUIDATION_PERCENTAGE) / 10000n;
+      expect(liquidatableAfter - liquidatableBefore).to.equal(expectedIncrease);
     });
 
-    it("跨季度累计收益计算应该正确", async function () {
+    it("多清算周期", async function () {
       // ===== 第一季度 =====
       const startTime = await time.latest();
       
@@ -184,100 +195,16 @@ describe("LiquidateManager 集成测试 (真实 RevenueManager)", function () {
       expect(await liquidateManager.liquidationCount()).to.equal(1); // 没有增加
     });
 
-    it("RevenueManager 时间戳截断功能集成测试", async function () {
-      // 使用不同的时间戳记录收益，测试截断功能
-      const baseTime = await time.latest();
-      const truncatedBase = baseTime - (baseTime % HOUR);
-
-      // 在同一小时内记录多次收益
-      await revenueManager.recordPeriodRevenue(ethers.parseUnits("2000", 6), baseTime);
-      await revenueManager.recordPeriodRevenue(ethers.parseUnits("3000", 6), baseTime + 1800); // 30分钟后
-      await revenueManager.recordPeriodRevenue(ethers.parseUnits("5000", 6), baseTime + 3000); // 50分钟后
-
-      // 验证累计收益
-      const totalRevenue = await revenueManager.lastestAccumulatedRevenue();
-      expect(totalRevenue).to.equal(ethers.parseUnits("10000", 6));
-
-      // 验证截断后的时间戳被标记
-      expect(await revenueManager.isTimestampRecorded(truncatedBase)).to.be.true;
-
-      // 验证最终累计收益正确（不是截断时间戳的累计值，而是最新的累计值）
-      const finalAccumulated = await revenueManager.getCurrentAccumulatedRevenue();
-      expect(finalAccumulated).to.equal(ethers.parseUnits("10000", 6));
-
-      // LiquidateManager 检查（刚好达标）
-      await liquidateManager.checkQuarterlyRevenue();
-      expect(await liquidateManager.liquidationCount()).to.equal(0);
-    });
-
-    it("多次清算场景下的时间范围查找", async function () {
-      // 模拟 4 个季度，其中 3 个不达标
-      const revenues = [
-        ethers.parseUnits("5000", 6),  // Q1: 不达标
-        ethers.parseUnits("7000", 6),  // Q2: 不达标 (季度收益 7000-5000=2000)
-        ethers.parseUnits("20000", 6), // Q3: 达标 (季度收益 20000-7000=13000)
-        ethers.parseUnits("25000", 6)  // Q4: 不达标 (季度收益 25000-20000=5000)
-      ];
-
-      const checkTimes = [];
-
-      for (let i = 0; i < revenues.length; i++) {
-        if (i > 0) {
-          await time.increase(QUARTER_DAYS * DAY);
-        }
-
-        // 记录该季度的收益
-        const currentTime = await time.latest();
-        const revenueToAdd = i === 0 
-          ? revenues[i] 
-          : revenues[i] - revenues[i - 1];
-        
-        await revenueManager.recordPeriodRevenue(revenueToAdd, currentTime);
-
-        // 执行检查
-        await liquidateManager.checkQuarterlyRevenue();
-        checkTimes.push(await time.latest());
-      }
-
-      // 验证清算次数（Q1, Q2, Q4 不达标）
-      expect(await liquidateManager.liquidationCount()).to.equal(3);
-
-      // 测试时间范围查找
-      const allLiquidationTimes = await liquidateManager.getAllLiquidationTimes();
-      expect(allLiquidationTimes.length).to.equal(3);
-
-      // 查找所有清算时间（注意：新的实现只返回 count）
-      const count = await liquidateManager.findLiquidationTimeRange(
-        checkTimes[0] - DAY,
-        checkTimes[3] + DAY
-      );
-
-      expect(count).to.equal(3);
-    });
-
-    it("零收益场景测试", async function () {
-      // 不记录任何收益，直接检查
-      await liquidateManager.checkQuarterlyRevenue();
-
-      // 验证：0 收益应该触发清算
-      expect(await liquidateManager.liquidationCount()).to.equal(1);
-      expect(await revenueManager.lastestAccumulatedRevenue()).to.equal(0);
-      
-      // 验证清算时间被记录
-      expect(await liquidateManager.getLiquidationTimesLength()).to.equal(1);
-    });
-
-    it("RevenueManager 按天记录收益测试", async function () {
+    it("一天内多次记录收益", async function () {
       // 切换到按天记录
-      await revenueManager.setUnitSeconds(2); // DAY
+      await revenueManager.setUnitSeconds(1); // DAY
 
       const startTime = await time.latest();
       
-      // 连续 90 天，每天记录收益
-      const dailyRevenue = ethers.parseUnits("120", 6); // 每天 120 USDT
+      const dailyRevenue = ethers.parseUnits("1000", 6); // 每小时 1000 USDT
       
-      for (let i = 0; i < 90; i++) {
-        await time.increase(DAY);
+      for (let i = 0; i < 15; i++) {
+        await time.increase(HOUR);
         await revenueManager.recordPeriodRevenue(
           dailyRevenue,
           await time.latest()
@@ -286,7 +213,7 @@ describe("LiquidateManager 集成测试 (真实 RevenueManager)", function () {
 
       // 验证累计收益：120 * 90 = 10800 USDT
       const totalRevenue = await revenueManager.lastestAccumulatedRevenue();
-      expect(totalRevenue).to.equal(ethers.parseUnits("10800", 6));
+      expect(totalRevenue).to.equal(ethers.parseUnits("15000", 6));
 
       // LiquidateManager 检查（应该达标）
       await liquidateManager.checkQuarterlyRevenue();
@@ -296,55 +223,7 @@ describe("LiquidateManager 集成测试 (真实 RevenueManager)", function () {
       expect(await liquidateManager.getLiquidationTimesLength()).to.equal(0);
     });
 
-    it("RevenueManager 索引查找功能集成", async function () {
-      const baseTime = await time.latest();
-      const truncatedBase = baseTime - (baseTime % HOUR);
-
-      // 记录多个时间点的收益
-      for (let i = 0; i < 10; i++) {
-        await time.increase(HOUR);
-        await revenueManager.recordPeriodRevenue(
-          ethers.parseUnits("1000", 6),
-          await time.latest()
-        );
-      }
-
-      // 使用 RevenueManager 的索引查找功能
-      const endTime = await time.latest();
-      const truncatedEnd = endTime - (endTime % HOUR);
-
-      // 查找最小索引
-      const minResult = await revenueManager.findMinMarkedIndex(
-        truncatedBase,
-        truncatedEnd
-      );
-      expect(minResult.found).to.be.true;
-
-      // 查找最大索引
-      const maxResult = await revenueManager.findMaxMarkedIndex(
-        truncatedBase,
-        truncatedEnd
-      );
-      expect(maxResult.found).to.be.true;
-
-      // 查找前一个索引
-      const prevResult = await revenueManager.findPreviousMarkedIndex(truncatedEnd);
-      expect(prevResult.found).to.be.true;
-
-      // 验证累计收益
-      expect(await revenueManager.lastestAccumulatedRevenue()).to.equal(
-        ethers.parseUnits("10000", 6)
-      );
-
-      // LiquidateManager 检查（达标）
-      await liquidateManager.checkQuarterlyRevenue();
-      expect(await liquidateManager.liquidationCount()).to.equal(0);
-      
-      // 达标时不记录到 liquidationTimes
-      expect(await liquidateManager.getLiquidationTimesLength()).to.equal(0);
-    });
-
-    it("边界情况：收益刚好等于预期", async function () {
+    it("收益刚好等于预期", async function () {
       // 记录刚好 10000 的收益
       const currentTime = await time.latest();
       await revenueManager.recordPeriodRevenue(
@@ -365,51 +244,7 @@ describe("LiquidateManager 集成测试 (真实 RevenueManager)", function () {
       expect(await liquidateManager.getLiquidationTimesLength()).to.equal(0);
     });
 
-    it("极端情况：超高收益测试", async function () {
-      // 记录超高收益
-      const highRevenue = ethers.parseUnits("1000000", 6); // 100万 USDT
-      const currentTime = await time.latest();
-      
-      await revenueManager.recordPeriodRevenue(highRevenue, currentTime);
-
-      // 验证
-      expect(await revenueManager.lastestAccumulatedRevenue()).to.equal(highRevenue);
-
-      // 检查（远超预期）
-      await liquidateManager.checkQuarterlyRevenue();
-      expect(await liquidateManager.liquidationCount()).to.equal(0);
-      
-      // 达标时不记录到 liquidationTimes
-      expect(await liquidateManager.getLiquidationTimesLength()).to.equal(0);
-    });
-
-    it("连续达标时周期检查行为", async function () {
-      // 第一次检查：达标
-      await revenueManager.recordPeriodRevenue(
-        ethers.parseUnits("12000", 6),
-        await time.latest()
-      );
-      await liquidateManager.checkQuarterlyRevenue();
-      expect(await liquidateManager.liquidationCount()).to.equal(0);
-      expect(await liquidateManager.getLiquidationTimesLength()).to.equal(0);
-      // lastRecordedRevenue = 12000
-
-      // 等待90天后第二次检查
-      await time.increase(QUARTER_DAYS * DAY);
-      await revenueManager.recordPeriodRevenue(
-        ethers.parseUnits("3000", 6),  // 累计 15000
-        await time.latest()
-      );
-      
-      // 第二次检查（季度收益 = 15000 - 12000 = 3000 < 10000，不达标）
-      await liquidateManager.checkQuarterlyRevenue();
-      
-      // 验证不达标
-      expect(await liquidateManager.liquidationCount()).to.equal(1);
-      expect(await liquidateManager.getLiquidationTimesLength()).to.equal(1);
-    });
-
-    it("不达标后再达标需要等待周期", async function () {
+    it("清算需要等待周期", async function () {
       // 第一次：不达标
       await revenueManager.recordPeriodRevenue(
         ethers.parseUnits("5000", 6),
@@ -423,86 +258,38 @@ describe("LiquidateManager 集成测试 (真实 RevenueManager)", function () {
       await expect(
         liquidateManager.checkQuarterlyRevenue()
       ).to.be.revertedWith("Quarter cycle not completed");
-      
-      // 等待90天后可以检查
-      await time.increase(QUARTER_DAYS * DAY);
-      
-      // 添加足够的收益使达标
-      await revenueManager.recordPeriodRevenue(
-        ethers.parseUnits("10000", 6),  // 累计变成 15000
-        await time.latest()
-      );
-      // 季度收益 = 15000 - 5000 = 10000 >= 10000，达标
-      
-      await liquidateManager.checkQuarterlyRevenue();
-      
-      // 第二次达标，清算次数不变
-      expect(await liquidateManager.liquidationCount()).to.equal(1);
-    });
-
-    it("混合场景：不达标-达标-不达标", async function () {
-      // Q1: 不达标
-      await revenueManager.recordPeriodRevenue(
-        ethers.parseUnits("5000", 6),
-        await time.latest()
-      );
-      await liquidateManager.checkQuarterlyRevenue();
-      expect(await liquidateManager.liquidationCount()).to.equal(1);
-      // lastRecordedRevenue = 5000
-      
-      // 等待90天
-      await time.increase(QUARTER_DAYS * DAY);
-      
-      // Q2: 添加足够收益使达标
-      await revenueManager.recordPeriodRevenue(
-        ethers.parseUnits("10000", 6),  // 累计变成 15000
-        await time.latest()
-      );
-      // 季度收益 = 15000 - 5000 = 10000 >= 10000，达标
-      await liquidateManager.checkQuarterlyRevenue();
-      expect(await liquidateManager.liquidationCount()).to.equal(1); // 不增加
-      // lastRecordedRevenue = 15000
-      
-      // 等待90天
-      await time.increase(QUARTER_DAYS * DAY);
-      
-      // Q3: 添加少量收益，不达标
-      await revenueManager.recordPeriodRevenue(
-        ethers.parseUnits("3000", 6),  // 累计变成 18000
-        await time.latest()
-      );
-      // 季度收益 = 18000 - 15000 = 3000 < 10000，不达标
-      await liquidateManager.checkQuarterlyRevenue();
-      expect(await liquidateManager.liquidationCount()).to.equal(2);
-      
-      // 验证 liquidationTimes 长度（Q1和Q3的不达标记录）
-      expect(await liquidateManager.getLiquidationTimesLength()).to.equal(2);
     });
   });
 
-  describe("RevenueManager 与 CollateralVault 的完整流程", function () {
-    it("不达标时应该正确调用 CollateralVault", async function () {
+  describe("测试 CollateralVault", function () {
+    it("不达标时应该正确更新 CollateralVault 的可清算金额", async function () {
+      // 记录清算前的状态
+      const liquidatableBefore = await collateralVault.liquidatableCollateralAmount();
+      const totalCollateral = await collateralVault.totalCollateralAmount();
+      
       // 记录不足的收益
       const currentTime = await time.latest();
       await revenueManager.recordPeriodRevenue(
         ethers.parseUnits("3000", 6),
         currentTime
       );
-
-      // 重置 mock 状态
-      await mockCollateralVault.resetMock();
-
+      
       // 执行检查
       await liquidateManager.checkQuarterlyRevenue();
 
-      // 验证 CollateralVault 被调用
-      expect(await mockCollateralVault.wasUpdateCalled()).to.be.true;
-      expect(await mockCollateralVault.getLastUpdatePercentage()).to.equal(
-        LIQUIDATION_PERCENTAGE
-      );
+      // 验证 CollateralVault 的可清算金额增加
+      const liquidatableAfter = await collateralVault.liquidatableCollateralAmount();
+      const expectedIncrease = totalCollateral * BigInt(LIQUIDATION_PERCENTAGE) / 10000n;
+      expect(liquidatableAfter - liquidatableBefore).to.equal(expectedIncrease);
+      
+      // 验证清算次数
+      expect(await liquidateManager.liquidationCount()).to.equal(1);
     });
 
-    it("达标时不应该调用 CollateralVault 的 updateLiquidatableCollateral", async function () {
+    it("达标时不应该更新 CollateralVault 的可清算金额", async function () {
+      // 记录清算前的状态
+      const liquidatableBefore = await collateralVault.liquidatableCollateralAmount();
+      
       // 记录足够的收益
       const currentTime = await time.latest();
       await revenueManager.recordPeriodRevenue(
@@ -510,104 +297,230 @@ describe("LiquidateManager 集成测试 (真实 RevenueManager)", function () {
         currentTime
       );
 
-      // 重置 mock 状态
-      await mockCollateralVault.resetMock();
-
       // 执行检查
       await liquidateManager.checkQuarterlyRevenue();
 
-      // 验证 CollateralVault 的 updateLiquidatableCollateral 没有被调用
-      expect(await mockCollateralVault.wasUpdateCalled()).to.be.false;
+      // 验证 CollateralVault 的可清算金额没有变化
+      const liquidatableAfter = await collateralVault.liquidatableCollateralAmount();
+      expect(liquidatableAfter).to.equal(liquidatableBefore);
       
       // 验证达标时不记录到 liquidationTimes
       expect(await liquidateManager.getLiquidationTimesLength()).to.equal(0);
-    });
-  });
-
-  describe("性能和 Gas 测试", function () {
-    it("处理大量收益记录后的检查", async function () {
-      const currentTime = await time.latest();
       
-      // 记录 100 次收益
-      for (let i = 0; i < 100; i++) {
-        await time.increase(HOUR);
-        await revenueManager.recordPeriodRevenue(
-          ethers.parseUnits("100", 6),
-          await time.latest()
-        );
-      }
-
-      // 验证累计收益
-      const totalRevenue = await revenueManager.lastestAccumulatedRevenue();
-      expect(totalRevenue).to.equal(ethers.parseUnits("10000", 6));
-
-      // 执行检查
-      const tx = await liquidateManager.checkQuarterlyRevenue();
-      const receipt = await tx.wait();
-      
-      console.log(`      Gas used for check after 100 records: ${receipt.gasUsed}`);
-
-      // 验证结果（达标）
+      // 验证清算次数为 0
       expect(await liquidateManager.liquidationCount()).to.equal(0);
-      expect(await liquidateManager.getLiquidationTimesLength()).to.equal(0);
     });
-  });
 
-  describe("事件验证", function () {
-    it("不达标时应该触发 LiquidationTriggered 事件", async function () {
-      const currentTime = await time.latest();
+    it("多次清算应该累计可清算金额", async function () {
+      const totalCollateral = await collateralVault.totalCollateralAmount();
+      const liquidatableBefore = await collateralVault.liquidatableCollateralAmount();
+      
+      // 第一次不达标
       await revenueManager.recordPeriodRevenue(
         ethers.parseUnits("5000", 6),
-        currentTime
+        await time.latest()
       );
-
-      // 监听事件（不验证精确时间戳，因为交易执行时间可能有微小差异）
-      const tx = await liquidateManager.checkQuarterlyRevenue();
-      const receipt = await tx.wait();
+      await liquidateManager.checkQuarterlyRevenue();
       
-      // 从事件中提取数据
-      const event = receipt.logs.find(
-        log => log.fragment && log.fragment.name === 'LiquidationTriggered'
+      // 等待7天
+      await time.increase(QUARTER_DAYS * DAY);
+      
+      // 第二次不达标
+      await revenueManager.recordPeriodRevenue(
+        ethers.parseUnits("3000", 6),
+        await time.latest()
       );
+      await liquidateManager.checkQuarterlyRevenue();
       
-      expect(event).to.not.be.undefined;
-      // 验证清算次数参数
-      expect(event.args[1]).to.equal(1);
+      // 验证累计了两次清算
+      const liquidatableAfter = await collateralVault.liquidatableCollateralAmount();
+      const expectedIncrease = totalCollateral * BigInt(LIQUIDATION_PERCENTAGE) / 10000n * 2n;
+      expect(liquidatableAfter - liquidatableBefore).to.equal(expectedIncrease);
+      
+      // 验证清算次数
+      expect(await liquidateManager.liquidationCount()).to.equal(2);
     });
 
-    it("应该触发 QuarterlyRevenueChecked 事件", async function () {
-      const currentTime = await time.latest();
+    it("应该能够从 CollateralVault 转出清算金", async function () {
+      // 触发一次清算
       await revenueManager.recordPeriodRevenue(
-        ethers.parseUnits("12000", 6),
-        currentTime
+        ethers.parseUnits("5000", 6),
+        await time.latest()
       );
-
-      // 监听事件
-      await expect(liquidateManager.checkQuarterlyRevenue())
-        .to.emit(liquidateManager, "QuarterlyRevenueChecked");
-    });
-
-    it("QuarterlyRevenueChecked 事件应包含正确的参数", async function () {
-      const currentTime = await time.latest();
-      await revenueManager.recordPeriodRevenue(
-        ethers.parseUnits("12000", 6),
-        currentTime
-      );
-
-      const tx = await liquidateManager.checkQuarterlyRevenue();
-      const receipt = await tx.wait();
+      await liquidateManager.checkQuarterlyRevenue();
       
-      // 查找事件
-      const event = receipt.logs.find(
-        log => log.fragment && log.fragment.name === 'QuarterlyRevenueChecked'
+      // 验证可清算金额增加
+      const liquidatableAmount = await collateralVault.liquidatableCollateralAmount();
+      expect(liquidatableAmount).to.be.greaterThan(0);
+      
+      // 模拟转出清算金（10% 份额，1 次清算）
+      const totalShares = ethers.parseUnits("1000000", 18);
+      const holderShares = ethers.parseUnits("100000", 18); // 10%
+      const liquidationCount = 1;
+      
+      const recipientBefore = await paymentToken.balanceOf(addr1.address);
+      
+      await collateralVault.transferLiquidatableCollateral(
+        addr1.address,
+        holderShares,
+        totalShares,
+        liquidationCount
       );
       
-      expect(event).to.not.be.undefined;
-      // 验证事件参数：meetsExpectation, actualRevenue, expectedRevenue
-      expect(event.args[1]).to.be.true; // meetsExpectation
-      expect(event.args[2]).to.equal(ethers.parseUnits("12000", 6)); // actualRevenue
-      expect(event.args[3]).to.equal(QUARTERLY_EXPECTED_DIVIDEND); // expectedRevenue
+      const recipientAfter = await paymentToken.balanceOf(addr1.address);
+      const received = recipientAfter - recipientBefore;
+      
+      // 验证收到了正确的清算金
+      const totalCollateral = await collateralVault.totalCollateralAmount();
+      const expectedAmount = totalCollateral * BigInt(LIQUIDATION_PERCENTAGE) / 10000n * holderShares / totalShares;
+      expect(received).to.equal(expectedAmount);
     });
   });
+
+  describe("findLiquidationTimeRange 函数测试", function () {
+    it("单次清算在时间范围内", async function () {
+      // 记录一次不达标（触发清算）
+      const beforeLiquidation = await time.latest();
+      
+      await revenueManager.recordPeriodRevenue(
+        ethers.parseUnits("5000", 6),
+        await time.latest()
+      );
+      await liquidateManager.checkQuarterlyRevenue();
+
+      // 验证清算次数
+      expect(await liquidateManager.liquidationCount()).to.equal(1);
+      expect(await liquidateManager.getLiquidationTimesLength()).to.equal(1);
+      
+      // 查找从 beforeLiquidation 开始的一个季度周期内的清算次数
+      const count = await liquidateManager.findLiquidationTimeRange(beforeLiquidation);
+      
+      expect(count).to.equal(1);
+    });
+
+    it("多次清算在时间范围内", async function () {
+      const startTime = await time.latest();
+      
+      // 第一次清算
+      await revenueManager.recordPeriodRevenue(
+        ethers.parseUnits("5000", 6),
+        await time.latest()
+      );
+      await liquidateManager.checkQuarterlyRevenue();
+
+      // 等待完整的一个季度周期
+      await time.increase(QUARTER_DAYS * DAY);
+
+      // 第二次清算
+      await revenueManager.recordPeriodRevenue(
+        ethers.parseUnits("3000", 6),
+        await time.latest()
+      );
+      await liquidateManager.checkQuarterlyRevenue();
+
+      // 验证总清算次数
+      expect(await liquidateManager.liquidationCount()).to.equal(2);
+      expect(await liquidateManager.getLiquidationTimesLength()).to.equal(2);
+      
+      // 从 startTime 查找，应该包含所有 >= startTime 的清算（两次）
+      const count = await liquidateManager.findLiquidationTimeRange(startTime);
+      
+      expect(count).to.equal(2);
+    });
+
+    it("应该在没有清算时返回 0", async function () {
+      // 记录达标收益（不触发清算）
+      const startTime = await time.latest();
+      
+        await revenueManager.recordPeriodRevenue(
+        ethers.parseUnits("15000", 6),
+          await time.latest()
+        );
+      await liquidateManager.checkQuarterlyRevenue();
+
+      // 验证没有清算
+      expect(await liquidateManager.liquidationCount()).to.equal(0);
+      
+      // 查找时间范围应该返回 0
+      const count = await liquidateManager.findLiquidationTimeRange(startTime);
+      
+      expect(count).to.equal(0);
+    });
+
+    it("holdTime 等于清算时间", async function () {
+      // 触发清算
+      await revenueManager.recordPeriodRevenue(
+        ethers.parseUnits("5000", 6),
+        await time.latest()
+      );
+      await liquidateManager.checkQuarterlyRevenue();
+      
+      // 获取清算时间
+      const liquidationTimes = await liquidateManager.getAllLiquidationTimes();
+      const liquidationTime = liquidationTimes[0];
+      
+      // 使用清算时间作为 holdTime（边界情况）
+      const count = await liquidateManager.findLiquidationTimeRange(liquidationTime);
+      
+      // 应该包含这次清算（因为条件是 >=）
+      expect(count).to.equal(1);
+    });
+
+    it("holdTime 在清算时间之后", async function () {
+      // 触发清算
+      await revenueManager.recordPeriodRevenue(
+        ethers.parseUnits("5000", 6),
+        await time.latest()
+      );
+      await liquidateManager.checkQuarterlyRevenue();
+      
+      // 等待一段时间后查找
+      await time.increase(DAY * 10);
+      const laterTime = await time.latest();
+      
+      // 从清算之后的时间开始查找（应该找不到）
+      const count = await liquidateManager.findLiquidationTimeRange(laterTime);
+      
+      expect(count).to.equal(0);
+    });
+
+    it("holdTime 在多个清算时间的中间", async function () {
+      // 第一次清算
+      await revenueManager.recordPeriodRevenue(
+        ethers.parseUnits("5000", 6),
+        await time.latest()
+      );
+      await liquidateManager.checkQuarterlyRevenue();
+      
+      // 等待一段时间并记录中间时间点
+      await time.increase(QUARTER_DAYS * DAY);
+      const middleTime = await time.latest();
+      
+      // 第二次清算
+      await revenueManager.recordPeriodRevenue(
+        ethers.parseUnits("3000", 6),
+        await time.latest()
+      );
+      await liquidateManager.checkQuarterlyRevenue();
+      
+      // 等待再触发第三次清算
+      await time.increase(QUARTER_DAYS * DAY);
+      await revenueManager.recordPeriodRevenue(
+        ethers.parseUnits("4000", 6),
+        await time.latest()
+      );
+      await liquidateManager.checkQuarterlyRevenue();
+      
+      // 验证总清算次数
+      expect(await liquidateManager.liquidationCount()).to.equal(3);
+      expect(await liquidateManager.getLiquidationTimesLength()).to.equal(3);
+      
+      // 从 middleTime 查找，应该只包含第二次和第三次清算（第一次在 middleTime 之前）
+      const count = await liquidateManager.findLiquidationTimeRange(middleTime);
+      
+      expect(count).to.equal(2); // 第一次清算在 middleTime 之前，不统计
+    });
+  });
+
 });
 

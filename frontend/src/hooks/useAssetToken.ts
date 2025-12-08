@@ -53,6 +53,14 @@ export function useTotalSupply() {
   })
 }
 
+export function useSoldOutTimestamp() {
+  return useReadContract({
+    address: CONTRACTS.AssetToken,
+    abi: AssetTokenABI,
+    functionName: 'soldOutTimestamp',
+  })
+}
+
 export function useHolderInfo(address?: `0x${string}`, index: number = 0) {
   return useReadContract({
     address: CONTRACTS.AssetToken,
@@ -100,11 +108,30 @@ export function useWithdrawDividend() {
     })
   }
 
+  // 解析错误消息，提取合约 revert 的原因
+  const parseErrorMessage = (error: any): string => {
+    if (!error) return ''
+    
+    // 从错误消息中提取 revert 原因
+    const message = error.message || error.toString()
+    
+    // 常见的合约错误模式
+    const revertMatch = message.match(/reverted with reason string '([^']+)'/)
+    if (revertMatch) return revertMatch[1]
+    
+    const customErrorMatch = message.match(/reverted with custom error '([^']+)'/)
+    if (customErrorMatch) return customErrorMatch[1]
+    
+    // 返回原始消息
+    return message
+  }
+
   return {
     withdraw,
     isPending: isPending || isConfirming,
     isSuccess,
     error,
+    errorMessage: parseErrorMessage(error), // ✨ 新增：解析后的错误消息
     hash,
   }
 }

@@ -25,5 +25,34 @@ contract AssetTokenTestHelper is AssetToken {
     function setRevenueManager(address _revenueManager) external {
         revenueManager = _revenueManager;
     }
+
+    /**
+     * @notice 添加持有者信息用于测试
+     * @param holder 持有者地址
+     * @param shares 持有份额数量
+     * @param holdingStartTime 持有开始时间
+     * @param lastDividendTime 上次领取分红的时间
+     * @param lastLiquidationClaimTime 上次领取清算金的时间
+     */
+    function addHolderInfo(
+        address holder,
+        uint256 shares,
+        uint256 holdingStartTime,
+        uint256 lastDividendTime,
+        uint256 lastLiquidationClaimTime
+    ) external {
+        holderInfo[holder].push(HolderInfo({
+            shares: shares,
+            holdingStartTime: holdingStartTime,
+            lastDividendTime: lastDividendTime,
+            lastLiquidationClaimTime: lastLiquidationClaimTime
+        }));
+        
+        // 如果还不是持有者，添加到持有者列表
+        if (!isHolder[holder]) {
+            isHolder[holder] = true;
+            holders.push(holder);
+        }
+    }
 }
 

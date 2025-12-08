@@ -28,6 +28,7 @@ interface IOrderBook {
 
     /**
      * @notice 创建卖单
+     * @param seller 实际卖方地址
      * @param amount 卖出数量
      * @param price 单价（稳定币，精度18位）
      * @param lastDividendTime 卖方在创建订单时的上次分红时间
@@ -35,6 +36,7 @@ interface IOrderBook {
      * @return orderId 订单ID
      */
     function createSellOrder(
+        address seller,
         uint256 amount,
         uint256 price,
         uint256 lastDividendTime,
