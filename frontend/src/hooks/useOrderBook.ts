@@ -2,6 +2,7 @@
 
 import { useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { OrderBookABI } from '@/abi/OrderBook'
+import { AssetTokenABI } from '@/abi/AssetToken'
 import { CONTRACTS } from '@/config/contracts'
 
 export function useOrder(orderId?: bigint) {
@@ -60,5 +61,101 @@ export type Order = {
   createdAt: bigint
   lastDividendTime: bigint
   lastLiquidationClaimTime: bigint
+}
+
+export function useSellShares() {
+  const { writeContract, data: hash, isPending, error } = useWriteContract()
+  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash })
+
+  const sell = async (amount: bigint, price: bigint, recipient: `0x${string}`) => {
+    writeContract({
+      address: CONTRACTS.AssetToken,
+      abi: AssetTokenABI,
+      functionName: 'sellShares',
+      args: [amount, price, recipient],
+      gas: 500000n,
+    })
+  }
+
+  return {
+    sell,
+    isPending: isPending || isConfirming,
+    isSuccess,
+    error,
+    hash,
+  }
+}
+
+export function usePayOrder() {
+  const { writeContract, data: hash, isPending, error } = useWriteContract()
+  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash })
+
+  const pay = async (orderId: bigint, purchaseAmount: bigint) => {
+    writeContract({
+      address: CONTRACTS.AssetToken,
+      abi: AssetTokenABI,
+      functionName: 'payOrder',
+      args: [orderId, purchaseAmount],
+      gas: 500000n,
+    })
+  }
+
+  return {
+    pay,
+    isPending: isPending || isConfirming,
+    isSuccess,
+    error,
+    hash,
+  }
+}
+
+export function useCancelOrder() {
+  const { writeContract, data: hash, isPending, error } = useWriteContract()
+  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash })
+
+  const cancel = async (orderId: bigint) => {
+    writeContract({
+      address: CONTRACTS.AssetToken,
+      abi: AssetTokenABI,
+      functionName: 'cancelOrder',
+      args: [orderId],
+      gas: 300000n,
+    })
+  }
+
+  return {
+    cancel,
+    isPending: isPending || isConfirming,
+    isSuccess,
+    error,
+    hash,
+  }
+}
+
+// 获取用户订单数量
+export function useUserOrderCount(address?: `0x${string}`) {
+  return useReadContract({
+    address: CONTRACTS.OrderBook,
+    abi: OrderBookABI,
+    functionName: 'getUserOrderCount',
+    args: address ? [address] : undefined,
+    query: {
+      enabled: !!address,
+    },
+  })
+}
+
+// 获取用户所有订单ID
+export function useUserOrders(address?: `0x${string}`) {
+  return useReadContract({
+    address: CONTRACTS.OrderBook,
+    abi: OrderBookABI,
+    functionName: 'getUserOrders',
+    args: address ? [address] : undefined,
+    query: {
+      enabled: !!address,
+      refetchInterval: 5000, // 每5秒刷新一次
+    },
+  })
 }
 

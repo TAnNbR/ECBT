@@ -107,7 +107,7 @@ contract AssetToken is IAssetToken, ERC20 {
      * @dev 要求 soldOutTimestamp 不为 0，即代币供应量已完全耗尽
      */
     modifier onlySoldOut() {
-        require(soldOutTimestamp != 0 && block.timestamp > (soldOutTimestamp + 1 days), "Token not sold out yet");
+        require(soldOutTimestamp != 0 && block.timestamp > (soldOutTimestamp + 1 minutes), "Token not sold out yet");
         _;
     }
 
@@ -197,7 +197,7 @@ contract AssetToken is IAssetToken, ERC20 {
 
         // 8. 如果供应量耗尽，记录售罄时间戳
         if (remainingMintableSupply == 0 && soldOutTimestamp == 0) {
-            soldOutTimestamp = block.timestamp + 1 days;
+            soldOutTimestamp = block.timestamp + 1 minutes;
         }
     }
 
@@ -311,8 +311,6 @@ contract AssetToken is IAssetToken, ERC20 {
         require(amount > 0, "Amount must be greater than 0");
         require(price > 0, "Price must be greater than 0");
         require(orderBook != address(0), "OrderBook not set");
-
-        
 
         // 2. 先提取所有可领取的分红和清算金，并合并所有份额
         // 这样确保卖家不会错过任何收益
@@ -489,13 +487,16 @@ contract AssetToken is IAssetToken, ERC20 {
             "Payment transfer failed"
         );
         
-        // 7. 转移 AssetToken 从卖家到买家
+        // 7. 解冻卖家的已成交份额
+        frozenAmounts[seller] -= purchaseAmount;
+        
+        // 8. 转移 AssetToken 从卖家到买家
         _transfer(seller, msg.sender, purchaseAmount);
         
-        // 8. 将买家添加到持有者列表
+        // 9. 将买家添加到持有者列表
         _addHolder(msg.sender);
         
-        // 9. 创建买家的持有信息
+        // 10. 创建买家的持有信息
         // 买家从当前时间开始持有，分红和清算时间设为 INVALID_TIMESTAMP
         holderInfo[msg.sender].push(
             HolderInfo({
@@ -506,7 +507,7 @@ contract AssetToken is IAssetToken, ERC20 {
             })
         );
         
-        // 10. 更新 OrderBook 中的订单状态（已成交数量）
+        // 11. 更新 OrderBook 中的订单状态（已成交数量）
         orderBook_.fillOrder(orderId, purchaseAmount);
     }
 

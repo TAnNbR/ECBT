@@ -52,8 +52,8 @@ async function main() {
   
   // 设置时间单位为 DAY (2)
   console.log("   配置 RevenueManager...");
-  await (await revenueManager.setUnitSeconds(2)).wait();
-  console.log("   ✓ 设置时间单位: DAY");
+  await (await revenueManager.setUnitSeconds(0)).wait();
+  console.log("   ✓ 设置时间单位: MINUTE");
   
   await (await revenueManager.setCollateralVault(collateralVaultAddress)).wait();
   console.log("   ✓ 设置 CollateralVault");

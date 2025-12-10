@@ -68,30 +68,30 @@ export function AssetOverview() {
       </Card>
 
       {/* Key Metrics */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Fundraise Goal</CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
+          <TrendingUp className="h-4 w-4 text-muted-foreground" />
+        </CardHeader>
+        <CardContent>
+          <div className="text-2xl font-bold">
               {formatCurrency(formatTokenAmount(fundraiseAmount, 6))}
-            </div>
+          </div>
             <p className="text-xs text-muted-foreground">Target capital raised</p>
-          </CardContent>
-        </Card>
+        </CardContent>
+      </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Tokens Sold</CardTitle>
-            <Coins className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{soldPercentage.toFixed(1)}%</div>
-            <p className="text-xs text-muted-foreground">
-              {totalSupply ? formatTokenAmount(totalSupply) : '0'} / {formatTokenAmount(maxTotalSupply)} tokens
-            </p>
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-sm font-medium">Tokens Sold</CardTitle>
+          <Coins className="h-4 w-4 text-muted-foreground" />
+        </CardHeader>
+        <CardContent>
+          <div className="text-2xl font-bold">{soldPercentage.toFixed(1)}%</div>
+          <p className="text-xs text-muted-foreground">
+            {totalSupply ? formatTokenAmount(totalSupply) : '0'} / {formatTokenAmount(maxTotalSupply)} tokens
+          </p>
             {/* Progress Bar */}
             <div className="mt-2 w-full bg-secondary rounded-full h-2">
               <div 
@@ -99,29 +99,29 @@ export function AssetOverview() {
                 style={{ width: `${Math.min(soldPercentage, 100)}%` }}
               />
             </div>
-          </CardContent>
-        </Card>
+        </CardContent>
+      </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Available Supply</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
+          <Users className="h-4 w-4 text-muted-foreground" />
+        </CardHeader>
+        <CardContent>
+          <div className="text-2xl font-bold">
               {remainingSupply ? formatTokenAmount(remainingSupply) : '0'}
-            </div>
+          </div>
             <p className="text-xs text-muted-foreground">Tokens remaining for purchase</p>
-          </CardContent>
-        </Card>
+        </CardContent>
+      </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Launch Date</CardTitle>
-            <Calendar className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatDate(Number(createdAt))}</div>
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-sm font-medium">Launch Date</CardTitle>
+          <Calendar className="h-4 w-4 text-muted-foreground" />
+        </CardHeader>
+        <CardContent>
+          <div className="text-2xl font-bold">{formatDate(Number(createdAt))}</div>
             <p className="text-xs text-muted-foreground">Asset creation date</p>
           </CardContent>
         </Card>
@@ -158,8 +158,8 @@ export function AssetOverview() {
             <p className="text-xs text-muted-foreground mt-2">
               The entity providing and managing the asset
             </p>
-          </CardContent>
-        </Card>
+        </CardContent>
+      </Card>
       </div>
     </div>
   )

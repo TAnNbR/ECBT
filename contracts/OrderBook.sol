@@ -209,6 +209,15 @@ contract OrderBook {
     }
 
     /**
+     * @notice 获取用户的订单数量
+     * @param user 用户地址
+     * @return 订单数量
+     */
+    function getUserOrderCount(address user) external view returns (uint256) {
+        return userOrders[user].length;
+    }
+
+    /**
      * @notice 获取订单剩余数量
      * @param orderId 订单ID
      * @return 剩余数量

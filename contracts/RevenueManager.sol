@@ -11,6 +11,7 @@ import "./interfaces/ICollateralVault.sol";
  * 设计原则：
  * - 一个合约实例对应一个资产和一个API
  * - 由 AutomationKeeper 定期触发
+ * - 收益精度：6位小数（USDT/USDC标准）
  */
 contract RevenueManager {
     using IndexBitmap for mapping(uint256 => uint256);

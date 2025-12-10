@@ -48,6 +48,20 @@ export const OrderBookABI = [
     stateMutability: 'view',
     type: 'function',
   },
+  {
+    inputs: [{ name: 'user', type: 'address' }],
+    name: 'getUserOrders',
+    outputs: [{ name: '', type: 'uint256[]' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'user', type: 'address' }],
+    name: 'getUserOrderCount',
+    outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
   
   // 写入函数
   {

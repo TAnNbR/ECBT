@@ -11,6 +11,7 @@ export function useERC20Balance(tokenAddress?: `0x${string}`, userAddress?: `0x$
     args: userAddress ? [userAddress] : undefined,
     query: {
       enabled: !!tokenAddress && !!userAddress,
+      refetchInterval: 2000, // 每2秒自动刷新
     },
   })
 }
@@ -27,6 +28,7 @@ export function useERC20Allowance(
     args: owner && spender ? [owner, spender] : undefined,
     query: {
       enabled: !!tokenAddress && !!owner && !!spender,
+      refetchInterval: 2000, // 每2秒自动刷新
     },
   })
 }

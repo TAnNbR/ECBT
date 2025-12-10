@@ -21,6 +21,7 @@ export function useAssetTokenBalance(address?: `0x${string}`) {
     args: address ? [address] : undefined,
     query: {
       enabled: !!address,
+      refetchInterval: 5000, // 每5秒自动刷新一次
     },
   })
 }
@@ -33,6 +34,7 @@ export function useFrozenAmount(address?: `0x${string}`) {
     args: address ? [address] : undefined,
     query: {
       enabled: !!address,
+      refetchInterval: 5000, // 每5秒自动刷新一次
     },
   })
 }
@@ -97,15 +99,28 @@ export function usePurchaseToken() {
 
 export function useWithdrawDividend() {
   const { writeContract, data: hash, isPending, error } = useWriteContract()
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash })
+  const { 
+    isLoading: isConfirming, 
+    isSuccess,
+    error: receiptError 
+  } = useWaitForTransactionReceipt({ 
+    hash,
+    timeout: 120_000, // ✨ 设置 2 分钟超时
+  })
 
   const withdraw = async (recipient: `0x${string}`, holder: `0x${string}`) => {
+    try {
     writeContract({
       address: CONTRACTS.AssetToken,
       abi: AssetTokenABI,
       functionName: 'withdrawDividend',
       args: [recipient, holder],
+        gas: 500000n, // 手动设置 gas limit
     })
+    } catch (err) {
+      console.error('Write contract error:', err)
+      throw err
+    }
   }
 
   // 解析错误消息，提取合约 revert 的原因
@@ -114,6 +129,17 @@ export function useWithdrawDividend() {
     
     // 从错误消息中提取 revert 原因
     const message = error.message || error.toString()
+    
+    // 处理常见错误
+    if (message.includes('transaction dropped') || message.includes('transaction replaced')) {
+      return '交易被替换或丢弃，请重试'
+    }
+    if (message.includes('timeout')) {
+      return '交易确认超时，请检查区块浏览器'
+    }
+    if (message.includes('user rejected')) {
+      return '用户取消了交易'
+    }
     
     // 常见的合约错误模式
     const revertMatch = message.match(/reverted with reason string '([^']+)'/)
@@ -126,12 +152,15 @@ export function useWithdrawDividend() {
     return message
   }
 
+  // 合并两种错误
+  const combinedError = error || receiptError
+
   return {
     withdraw,
     isPending: isPending || isConfirming,
     isSuccess,
-    error,
-    errorMessage: parseErrorMessage(error), // ✨ 新增：解析后的错误消息
+    error: combinedError,
+    errorMessage: parseErrorMessage(combinedError), // 解析后的错误消息
     hash,
   }
 }

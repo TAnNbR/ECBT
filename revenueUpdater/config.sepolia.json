@@ -1,0 +1,22 @@
+{
+  "network": "sepolia",
+  "rpcUrl": "https://eth-sepolia.g.alchemy.com/v2/-cmnMTOr75jWEZXXnNInsIvNHkv8vsYa",
+  "contracts": {
+    "revenueManager": "0x327C7dc5071E77aBe5df5Bf8FA3c82045E1294be",
+    "assetToken": "0xCD7FF2BFbB5ce16D629B5b09F29c9359C075b36D",
+    "collateralVault": "0x21C08CA468143Da59847eD0A5842885891024471",
+    "mockERC20": "0x47785ECE94B84ee41E21435A6A75d46646b78D85"
+  },
+  "settings": {
+    "enableOnchain": true,
+    "updateInterval": 5000,
+    "monitorInterval": 15000,
+    "adapterPort": 8080,
+    "mockApiPort": 8081,
+    "assetId": "RealEstate"
+  },
+  "accounts": {
+    "deployer": "0x58ac06617D42bCa05D958d7Ee314f621FD8C16b7"
+  }
+}
+

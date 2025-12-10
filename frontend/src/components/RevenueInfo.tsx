@@ -40,7 +40,7 @@ export function RevenueInfo() {
               {formatCurrency(formatTokenAmount(totalRevenue, 6))}
             </div>
             <p className="text-xs text-muted-foreground">
-              Accumulated revenue (USDT)
+              Accumulated revenue (USDT, 6 decimals)
             </p>
           </CardContent>
         </Card>

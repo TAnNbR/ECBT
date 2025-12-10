@@ -1,0 +1,41 @@
+{
+  "name": "ecbt-revenue-updater",
+  "version": "1.0.0",
+  "description": "自动更新 RevenueManager 合约收益数据的服务",
+  "main": "index.js",
+  "scripts": {
+    "start:all": "./start-all.sh",
+    "stop:all": "./stop-all.sh",
+    "status": "./check-status.sh",
+    "start:adapter": "node adapters/adapter.cjs",
+    "start:mockapi": "node adapters/mockApi.cjs",
+    "start:updater": "node adapters/updater.cjs",
+    "start:monitor": "node adapters/contractMonitor.cjs",
+    "sepolia:monitor": "node adapters/contractMonitor.sepolia.cjs",
+    "sepolia:updater": "node adapters/updater.sepolia.cjs",
+    "logs:mockapi": "tail -f mockapi.log",
+    "logs:adapter": "tail -f adapter.log",
+    "logs:updater": "tail -f updater.log",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "ethereum",
+    "chainlink",
+    "oracle",
+    "revenue",
+    "real-estate"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "ethers": "^6.9.0",
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
+

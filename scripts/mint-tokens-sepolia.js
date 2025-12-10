@@ -9,8 +9,8 @@ async function main() {
   const paymentTokenAddress = deploymentInfo.contracts.MockERC20;
 
   // 目标地址和铸造金额
-  const targetAddress = "0x58ac06617D42bCa05D958d7Ee314f621FD8C16b7";
-  const mintAmount = ethers.parseUnits("50000000", 6); // 50,000,000 USDT
+  const targetAddress = "0x58ac06617d42bca05d958d7ee314f621fd8c16b7";
+  const mintAmount = ethers.parseUnits("5000000000000000000000000000", 6); // 50,000,000 USDT
 
   console.log("配置信息:");
   console.log("  网络: Sepolia");

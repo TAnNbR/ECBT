@@ -4,12 +4,17 @@ import { Header } from '@/components/Header'
 import { AssetOverview } from '@/components/AssetOverview'
 import { RevenueInfo } from '@/components/RevenueInfo'
 import { PurchaseModal } from '@/components/PurchaseModal'
+import { ContractAddresses } from '@/components/ContractAddresses'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { TrendingUp, Shield, Zap, Globe } from 'lucide-react'
+import { useCollateralVaultStatus } from '@/hooks/useCollateralVault'
+import { formatTokenAmount, formatCurrency } from '@/lib/utils'
+import { TrendingUp, TrendingDown, Shield, Zap, Globe, Vault, DollarSign, Coins, AlertCircle } from 'lucide-react'
 import Link from 'next/link'
 
 export default function Home() {
+  const vaultStatus = useCollateralVaultStatus()
+  
   return (
     <div className="min-h-screen">
       <Header />
@@ -45,6 +50,136 @@ export default function Home() {
       {/* Revenue Information */}
       <section className="container py-12 bg-muted/50">
         <RevenueInfo />
+      </section>
+
+      {/* Collateral Vault Stats - All 7 Variables */}
+      <section className="container py-12">
+        <h2 className="text-3xl font-bold mb-8 flex items-center gap-2">
+          <Vault className="h-8 w-8" />
+          Collateral Vault Status
+        </h2>
+        
+        {/* Row 1: Fundraise (3 variables) */}
+        <div className="mb-4">
+          <h3 className="text-lg font-semibold mb-3 text-muted-foreground">Fundraise Metrics</h3>
+          <div className="grid gap-4 md:grid-cols-3">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Fundraised Amount</CardTitle>
+                <DollarSign className="h-4 w-4 text-blue-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-blue-600">
+                  {formatCurrency(formatTokenAmount(vaultStatus.totalFundraised, 6))}
+                </div>
+                <p className="text-xs text-muted-foreground">totalFundraisedAmount</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Withdrawn Fundraise</CardTitle>
+                <TrendingDown className="h-4 w-4 text-orange-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-orange-600">
+                  {formatCurrency(formatTokenAmount(vaultStatus.withdrawnFundraise, 6))}
+                </div>
+                <p className="text-xs text-muted-foreground">totalWithdrawnFundraise</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Available Fundraise</CardTitle>
+                <DollarSign className="h-4 w-4 text-green-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-green-600">
+                  {formatCurrency(formatTokenAmount(vaultStatus.availableFundraise, 6))}
+                </div>
+                <p className="text-xs text-muted-foreground">Calculated: fundraised - withdrawn</p>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+
+        {/* Row 2: Revenue (3 variables) */}
+        <div className="mb-4">
+          <h3 className="text-lg font-semibold mb-3 text-muted-foreground">Revenue Metrics</h3>
+          <div className="grid gap-4 md:grid-cols-3">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Current Revenue</CardTitle>
+                <TrendingUp className="h-4 w-4 text-purple-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-purple-600">
+                  {formatCurrency(formatTokenAmount(vaultStatus.currentRevenue, 18))}
+                </div>
+                <p className="text-xs text-muted-foreground">currentRevenue</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Deposited Revenue</CardTitle>
+                <Coins className="h-4 w-4 text-blue-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-blue-600">
+                  {formatCurrency(formatTokenAmount(vaultStatus.depositedRevenue, 6))}
+                </div>
+                <p className="text-xs text-muted-foreground">depositedRevenue (USDT)</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Distributed Revenue</CardTitle>
+                <TrendingDown className="h-4 w-4 text-orange-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-orange-600">
+                  {formatCurrency(formatTokenAmount(vaultStatus.distributedRevenue, 6))}
+                </div>
+                <p className="text-xs text-muted-foreground">distributedRevenue (USDT)</p>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+
+        {/* Row 3: Collateral (2 variables) */}
+        <div>
+          <h3 className="text-lg font-semibold mb-3 text-muted-foreground">Collateral Metrics</h3>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Collateral Amount</CardTitle>
+                <Shield className="h-4 w-4 text-amber-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-amber-600">
+                  {formatCurrency(formatTokenAmount(vaultStatus.totalCollateral, 6))}
+                </div>
+                <p className="text-xs text-muted-foreground">totalCollateralAmount</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Liquidatable Collateral Amount</CardTitle>
+                <AlertCircle className="h-4 w-4 text-red-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-red-600">
+                  {formatCurrency(formatTokenAmount(vaultStatus.liquidatableCollateral, 6))}
+                </div>
+                <p className="text-xs text-muted-foreground">liquidatableCollateralAmount</p>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
       </section>
 
       {/* Features */}
@@ -114,6 +249,11 @@ export default function Home() {
             <PurchaseModal />
           </CardContent>
         </Card>
+      </section>
+
+      {/* Contract Addresses */}
+      <section className="container py-12">
+        <ContractAddresses />
       </section>
 
       {/* Footer */}

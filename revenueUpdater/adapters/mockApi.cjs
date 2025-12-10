@@ -27,6 +27,11 @@ const assetData = {
     revenue: 500000,
     decimals: 6,
     fluctuation: 0.01 // 波动范围 ±1%
+  },
+  'RealEstate': {
+    revenue: 1000000,  // 1 USDT
+    decimals: 6,
+    fluctuation: 0.015 // 波动范围 ±1.5%
   }
 };
 

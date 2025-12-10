@@ -2,6 +2,8 @@
 
 import { Header } from '@/components/Header'
 import { AssetOverview } from '@/components/AssetOverview'
+import { CollateralVaultInfo } from '@/components/CollateralVaultInfo'
+import { SPVDepositPanel } from '@/components/SPVDepositPanel'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { useAccount } from 'wagmi'
@@ -94,10 +96,20 @@ export default function DashboardPage() {
           </Card>
         </div>
 
+        {/* SPV Deposit Panel (only visible to SPV) */}
+        <div className="mb-8">
+          <SPVDepositPanel />
+        </div>
+
         {/* Asset Overview */}
         <div className="mb-8">
           <h2 className="text-2xl font-bold mb-4">Asset Overview</h2>
           <AssetOverview />
+        </div>
+
+        {/* Collateral Vault Info */}
+        <div className="mb-8">
+          <CollateralVaultInfo />
         </div>
 
         {/* Quick Actions */}

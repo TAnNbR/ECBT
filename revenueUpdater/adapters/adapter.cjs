@@ -10,13 +10,13 @@ const PORT = process.env.PORT || 8080;
 /**
  * External Adapter for Revenue Oracle
  * 
- * 功能：从外部API获取收益数据，并转换为18位精度格式
+ * 功能：从外部API获取收益数据，并转换为6位精度格式（USDT精度）
  * 
  * 输入参数：
  * - assetId: 资产ID
  * 
  * 输出：
- * - periodRevenue: 周期收益金额（18位精度）
+ * - periodRevenue: 周期收益金额（6位精度，USDT）
  * - timestamp: 时间戳
  */
 
@@ -51,13 +51,25 @@ async function fetchRevenueFromExternalAPI(assetId) {
 }
 
 /**
- * 转换收益数据为18位精度格式
+ * 转换收益数据为6位精度格式（USDT精度）
  */
 function convertToPrecision(revenue, decimals) {
-  // 转换为18位精度
-  const revenueWith18Decimals = BigInt(revenue) * BigInt(10 ** (18 - decimals));
+  // 转换为6位精度（USDT/USDC标准）
+  const targetDecimals = 6;
+  let revenueWith6Decimals;
   
-  return revenueWith18Decimals.toString();
+  if (decimals > targetDecimals) {
+    // 如果输入精度高于6位，需要除以
+    revenueWith6Decimals = BigInt(revenue) / BigInt(10 ** (decimals - targetDecimals));
+  } else if (decimals < targetDecimals) {
+    // 如果输入精度低于6位，需要乘以
+    revenueWith6Decimals = BigInt(revenue) * BigInt(10 ** (targetDecimals - decimals));
+  } else {
+    // 如果精度相同，直接返回
+    revenueWith6Decimals = BigInt(revenue);
+  }
+  
+  return revenueWith6Decimals.toString();
 }
 
 /**
@@ -91,7 +103,7 @@ app.post('/', async (req, res) => {
     // 从外部API获取数据
     const apiData = await fetchRevenueFromExternalAPI(assetId);
 
-    // 转换为18位精度
+    // 转换为6位精度（USDT标准）
     const periodRevenue = convertToPrecision(
       apiData.revenue,
       apiData.decimals
