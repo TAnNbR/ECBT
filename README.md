@@ -170,8 +170,11 @@ function checkQuarterlyRevenue() external returns (bool meetsExpectation) {
 ```
 
 **收益周期**：
+
 ![收益周期](img/6.png)
+
 **清算周期**：
+
 
 ![清算周期](img/7.png)
 
@@ -212,8 +215,11 @@ AssetToken (业务入口)
     └── LiquidateManager (清算控制)
 ```
 **分红提取**：
+
 ![分红提取流程](img/10.png)
+
 **份额组合**：
+
 
 ![份额操作流程](img/11.png)
 
@@ -294,5 +300,6 @@ npm run dev
 访问 http://localhost:3000
 
 ---
+
 
 
