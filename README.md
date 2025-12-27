@@ -87,14 +87,21 @@ mapping(address => HolderInfo[]) public holderInfo;
 
 **收益更新流程**：
 
+
 ![收益更新架构](img/2.png)
+
 **位图与映射存储**：
 
+
 ![位图与映射存储](img/3.png)
+
 **位图查询示例**：
 
+
 ![位图查询示例](img/4.png)
+
 **分红计算时间线**：
+
 
 ![分红计算时间线](img/5.png)
 
@@ -287,4 +294,5 @@ npm run dev
 访问 http://localhost:3000
 
 ---
+
 
